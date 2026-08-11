@@ -1,0 +1,65 @@
+# Publish the device to GitHub Pages.
+#
+# `frontend/` is the whole site: one self-contained HTML file plus the dev
+# server that is never used here. There is no build step and nothing to install
+# — genlayer-js is imported from esm.sh at runtime — so this workflow only has
+# to copy a directory and hand it to Pages.
+#
+# Turn it on once, in the repo's Settings → Pages → Build and deployment →
+# Source: **GitHub Actions**. Without that the job fails at the deploy step with
+# a "Pages is not enabled" error; nothing else is needed.
+#
+# The published address is https://<user>.github.io/<repo>/ — free, HTTPS, no
+# domain to buy. A custom domain is optional and changes nothing here.
+name: Publish the frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/pages.yml"
+  # …and a button, for publishing without touching the frontend.
+  workflow_dispatch:
+
+# Pages needs to mint an id-token to deploy; nothing here needs write access to
+# the repository itself.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two publishes race. `cancel-in-progress: false` because a half-
+# finished deploy is worse than a slightly stale one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the page is really self-contained
+        # The one way this site can break after publishing is a relative
+        # <script src>/<link href> that worked locally and 404s under the
+        # /<repo>/ path prefix Pages serves from. Catch it here rather than in
+        # a screenshot of a blank page.
+        run: |
+          if grep -nE '<(script|link)[^>]+(src|href)="[^"h#/]' frontend/index.html; then
+            echo "::error::relative asset reference — it will 404 under the Pages path prefix"
+            exit 1
+          fi
+          echo "no relative asset references"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
