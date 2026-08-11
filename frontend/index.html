@@ -254,6 +254,8 @@
   }
   .console.ok  { border-left-color: #6fbf5e; color: #cfe9c6; }
   .console.err { border-left-color: var(--coral); color: #ffc9c2; }
+  /* connected, but the wallet is empty — not an error, not nothing to say */
+  .console.warn { border-left-color: #ffc24d; color: #f2ddb4; }
 
   /* data lists */
   .board { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
@@ -649,7 +651,25 @@ const FRAMING = new Set(["data","events","fingerprint","frames","func","module_n
 
 function revertReason(err) {
   const hex = err?.cause?.data ?? err?.data;
-  const fallback = err?.shortMessage || err?.message || String(err);
+
+  // WHERE THE TRUTH ACTUALLY IS. genlayer-js hands node errors to viem, which
+  // wraps a JSON-RPC -32602 as `InvalidParamsRpcError` — so `message` and
+  // `shortMessage` both read "Invalid parameters were provided to the RPC
+  // method", which is true of nothing and helps nobody. The node's own sentence
+  // survives in `details` / `metaMessages` / the cause chain. Reading only
+  // `message` is how "nothing works" reached a player when the node had plainly
+  // said `sender does not have enough funds (0) to cover transaction fees`.
+  const deep = [err?.details, err?.metaMessages?.join(" "), err?.cause?.details,
+                err?.cause?.message, err?.cause?.cause?.message]
+    .filter(t => typeof t === "string" && t.trim()).join(" ");
+  if (/does not have enough funds|insufficient funds/i.test(deep)) {
+    return "this account has no GEN — use the faucet link above";
+  }
+  const node = deep.match(/[^[\]:]*(?:does not|cannot|failed|exceeds|not allowed|rejected)[^[\]]*/i);
+  const fallback = (node && node[0].trim())
+    || (err?.shortMessage && !/Invalid parameters were provided/i.test(err.shortMessage)
+        ? err.shortMessage : "")
+    || err?.message || String(err);
   if (typeof hex !== "string") return fallback;
   const clean = hex.replace(/^0x/, "");
   if (!/^[0-9a-fA-F]+$/.test(clean) || clean.length % 2) return fallback;
@@ -1050,7 +1070,16 @@ $("connect").onclick = async () => {
     account = createAccount(pk);
     client = createClient({ chain, account });
 
-    setStatus("Connected to " + netKey + ".\nAccount " + (account.address || "(hidden)"), "ok");
+    // Say the balance out loud, on connect. Reading works with an empty wallet
+    // and writing does not, so an account at 0 looks identical to a working one
+    // until the first button — and then fails with the node's error wrapped in
+    // "Invalid parameters", which reads as "the game is broken" rather than
+    // "fetch some GEN". Better to show the number before anything is pressed.
+    const funds = await walletBalance();
+    setStatus("Connected to " + netKey + ".\nAccount " + (account.address || "(hidden)")
+      + (funds === null ? "" : `\nBalance ${fmtGen(funds)} GEN`
+        + (funds === 0n ? " — reading works; the buttons need GEN from the faucet." : "")),
+      funds === 0n ? "warn" : "ok");
     $("refresh").disabled = false;
     refreshShareLink();
     await loadState();
@@ -1080,6 +1109,15 @@ $("freeze").onclick = () => doAction("set_evolution", {
 });
 $("forget").onclick = () => doAction("reset_character", { label: "reset" });
 
+/** The account's GEN, or null if it cannot be read. */
+async function walletBalance() {
+  try {
+    return await client.getBalance({ address: account.address });
+  } catch { return null; }
+}
+
+const fmtGen = (wei) => (Number(wei) / 1e18).toFixed(4);
+
 async function doAction(fn, opts = {}) {
   if (!client) return false;
   const prevView = ui.view;
@@ -1087,6 +1125,23 @@ async function doAction(fn, opts = {}) {
     setBusy(true);
     ui.view = "busy"; ui.progress = "sending";
     const value = opts.value ?? (fn === "feed" ? toWei($("feedAmt").value) : 0n);
+
+    // Ask before spending a round-trip on a transaction the node will refuse.
+    // Every action costs gas, including the ones that send no value, so an empty
+    // account can do nothing — and finding that out from a rejected transaction
+    // is the worst possible way to learn it.
+    const funds = await walletBalance();
+    if (funds !== null && funds <= value) {
+      ui.view = prevView === "busy" ? "home" : prevView;
+      ui.message = "no gen";
+      setStatus(
+        `${fn}() needs GEN and this account has ${fmtGen(funds)}.\n`
+        + `Account ${account.address}\n`
+        + "Send it testnet GEN from the faucet link above, then press the button again.",
+        "err");
+      beep(180, 160);
+      return false;
+    }
     const label = opts.label ?? (fn === "feed" ? $("feedAmt").value + " GEN" : "");
     setStatus(`Sending ${fn}()${label ? " (" + label + ")" : ""}…\n`
       + "Waiting for consensus — the web request and the LLM take a while.");
