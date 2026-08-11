@@ -5,9 +5,11 @@
 # — genlayer-js is imported from esm.sh at runtime — so this workflow only has
 # to copy a directory and hand it to Pages.
 #
-# Turn it on once, in the repo's Settings → Pages → Build and deployment →
-# Source: **GitHub Actions**. Without that the job fails at the deploy step with
-# a "Pages is not enabled" error; nothing else is needed.
+# Nothing to switch on by hand: `enablement: true` below turns Pages on through
+# the API on the first run. Without it the very first run dies at
+# `configure-pages` with "Get Pages site failed … Not Found" — Pages has to
+# exist before it can be configured, and a fresh repo has none. Measured here on
+# run 1, which failed in 15 s for exactly that reason.
 #
 # The published address is https://<user>.github.io/<repo>/ — free, HTTPS, no
 # domain to buy. A custom domain is optional and changes nothing here.
@@ -57,6 +59,10 @@ jobs:
           echo "no relative asset references"
 
       - uses: actions/configure-pages@v5
+        with:
+          # Create the Pages site if the repo has none, instead of failing.
+          enablement: true
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: frontend
