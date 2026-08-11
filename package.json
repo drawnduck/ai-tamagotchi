@@ -1,0 +1,27 @@
+{
+  "name": "ai-tamagotchi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "On-chain AI pet (Intelligent Contract) on GenLayer + minimal frontend",
+  "scripts": {
+    "build:contract": "python3 tools/buildContract.py contracts/ai_pet.py -o build/ai_pet.py && python3 tools/buildContract.py contracts/pet_factory.py -o build/pet_factory.py",
+    "deploy:localnet": "genlayer deploy --network localnet",
+    "deploy:studio": "genlayer deploy --network studionet",
+    "deploy:studio:live": "node deploy/studioDeploy.mjs",
+    "deploy:testnet": "genlayer deploy --network testnet_bradbury",
+    "deploy:bradbury": "node deploy/bradbury.mjs",
+    "demo:bradbury": "node deploy/demoArc.mjs",
+    "demo:twopets": "node deploy/twoPets.mjs",
+    "demo:persona": "node deploy/personaArc.mjs",
+    "demo:factory": "node deploy/factoryArc.mjs",
+    "frontend": "node frontend/serve.mjs",
+    "test:network": "node --test tests/network/"
+  },
+  "dependencies": {
+    "genlayer-js": "^1.1.8"
+  },
+  "devDependencies": {
+    "genlayer": "^0.39.2"
+  }
+}

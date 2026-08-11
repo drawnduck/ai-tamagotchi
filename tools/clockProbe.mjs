@@ -1,0 +1,15 @@
+import { readFileSync } from "fs";
+import { createClient, createAccount } from "genlayer-js";
+import { testnetBradbury } from "genlayer-js/chains";
+import { installGasBuffer } from "../lib/gasBuffer.mjs";
+import { waitForSettled, statusName } from "../lib/waitForSettled.mjs";
+installGasBuffer();
+const pk = readFileSync(".env","utf8").match(/^\s*[A-Z_0-9]*PRIVATE_KEY[A-Z_0-9]*\s*=\s*(0x[0-9a-fA-F]{64})/m)[1];
+const client = createClient({ chain: testnetBradbury, account: createAccount(pk) });
+const tx0 = await waitForSettled(client, await client.deployContract({ code: new Uint8Array(readFileSync("tools/clockProbe.py")), args: [] }));
+const address = tx0.recipient;
+console.log("clock probe", address, statusName(tx0.status));
+const tx = await waitForSettled(client, await client.writeContract({ address, functionName: "sample", args: [], value: 0n }));
+console.log("sample() →", statusName(tx.status), "/", tx.txExecutionResultName ?? "?");
+console.log(JSON.stringify(await client.readContract({ address, functionName: "get_all", args: [] }), null, 1));
+console.log("host time now:", Math.floor(Date.now()/1000));

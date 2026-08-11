@@ -1,0 +1,1308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AiPet — an on-chain tamagotchi</title>
+<style>
+  /* ─────────────────────────────────────────────────────────────────────────
+     The page is a desk, and the toy is sitting on it. Everything that is not
+     the toy is a paper slip beside it: monospaced, small-caps, technical.
+     Three typographic voices, none of them downloaded —
+       · the LCD:   a 5×7 bitmap font drawn pixel by pixel onto a canvas
+       · the labels: system monospace, uppercase, letterspaced
+       · the prose:  a system serif, because this is a manual, not a dashboard
+     ───────────────────────────────────────────────────────────────────────── */
+  :root {
+    --desk:        #14110d;
+    --desk-lift:   #1d1913;
+    --ink:         #efe7d8;
+    --ink-dim:     #9d9484;
+    --ink-faint:   #6b6558;
+    --rule:        #322c23;
+
+    /* the toy: milky teal plastic, coral buttons, cream bezel */
+    --shell:       #5ec8c1;
+    --shell-hi:    #a7e8e3;
+    --shell-lo:    #22736f;
+    --shell-deep:  #14504e;
+    --bezel:       #efe4cf;
+    --bezel-lo:    #bfb198;
+    --coral:       #ff5b4a;
+    --coral-lo:    #c03729;
+
+    /* the screen */
+    --lcd:         #9fb14f;
+    --lcd-lo:      #86994a;
+    --lcd-ink:     #17200c;
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 15px;
+    line-height: 1.55;
+    background:
+      radial-gradient(120% 90% at 50% -20%, #2b2419 0%, transparent 60%),
+      radial-gradient(90% 70% at 50% 120%, #241d14 0%, transparent 55%),
+      var(--desk);
+    min-height: 100vh;
+  }
+  /* grain — the desk should not look like a flat swatch */
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 99;
+    opacity: .16; mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.55'/></svg>");
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 22px 90px; }
+
+  /* ── masthead ─────────────────────────────────────────────────────────── */
+  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 34px; }
+  h1 {
+    font-family: var(--mono); font-size: 13px; font-weight: 700;
+    letter-spacing: .34em; text-transform: uppercase; margin: 0; color: var(--ink);
+  }
+  .tagline { font-size: 14px; color: var(--ink-dim); font-style: italic; margin: 0; }
+  .tagline b { color: var(--shell); font-style: normal; font-weight: 400; }
+
+  /* ── the stage: toy on the left, paper on the right ───────────────────── */
+  .stage { display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 46px; align-items: start; }
+  @media (max-width: 900px) { .stage { grid-template-columns: 1fr; gap: 32px; } }
+
+  .toybox { position: sticky; top: 28px; }
+  @media (max-width: 900px) { .toybox { position: static; } }
+
+  /* ── the device ───────────────────────────────────────────────────────── */
+  .device {
+    position: relative;
+    max-width: 372px; margin: 0 auto;
+    /* the silhouette has to stay clear of the bezel corners at every width,
+       hence the generous flanks — an egg that clips its own screen reads as a
+       mistake rather than as a shape */
+    padding: 52px 40px 30px;
+    border-radius: 46% 46% 42% 42% / 32% 32% 50% 50%;
+    background:
+      radial-gradient(120% 80% at 30% 8%, var(--shell-hi) 0%, var(--shell) 38%, var(--shell-lo) 84%, var(--shell-deep) 100%);
+    box-shadow:
+      inset 0 3px 0 rgba(255,255,255,.55),
+      inset 0 -14px 26px rgba(0,0,0,.34),
+      inset 0 0 0 1px rgba(0,0,0,.18),
+      0 30px 46px -22px rgba(0,0,0,.85),
+      0 4px 10px rgba(0,0,0,.4);
+    transform: rotate(-1.4deg);
+    transition: transform .5s cubic-bezier(.2,.9,.3,1);
+  }
+  .device:hover { transform: rotate(-.4deg) translateY(-2px); }
+  /* specular sheen across the plastic */
+  .device::after {
+    content: ""; position: absolute; left: 12%; right: 34%; top: 4%; height: 24%;
+    border-radius: 50%; pointer-events: none;
+    background: linear-gradient(160deg, rgba(255,255,255,.62), rgba(255,255,255,0) 70%);
+    filter: blur(3px);
+  }
+  /* the loop the keychain went through */
+  .device::before {
+    content: ""; position: absolute; top: -13px; left: 50%; width: 34px; height: 22px;
+    transform: translateX(-50%);
+    border: 5px solid var(--shell-lo); border-bottom: none;
+    border-radius: 18px 18px 0 0;
+    box-shadow: inset 0 2px 0 rgba(255,255,255,.3);
+  }
+
+  .brandline {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--mono); font-size: 8px; letter-spacing: .22em; text-transform: uppercase;
+    color: rgba(6,40,38,.6); margin: 0 4px 12px; text-shadow: 0 1px 0 rgba(255,255,255,.35);
+  }
+
+  /* the bezel around the glass */
+  .bezel {
+    padding: 11px;
+    border-radius: 22px;
+    background: linear-gradient(180deg, var(--bezel), var(--bezel-lo));
+    box-shadow:
+      inset 0 2px 0 rgba(255,255,255,.85),
+      inset 0 -3px 6px rgba(0,0,0,.22),
+      0 2px 5px rgba(0,0,0,.35);
+  }
+  .glass {
+    position: relative;
+    border-radius: 9px;
+    background: linear-gradient(175deg, var(--lcd), var(--lcd-lo));
+    box-shadow: inset 0 0 0 2px rgba(0,0,0,.55), inset 0 3px 14px rgba(0,0,0,.35);
+    overflow: hidden;
+  }
+  #lcd {
+    display: block; width: 100%; height: auto;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+  }
+  /* the dot matrix, and a glare across the plastic window */
+  .glass::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+      linear-gradient(115deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,0) 38%),
+      repeating-linear-gradient(0deg, rgba(0,0,0,.14) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(0,0,0,.10) 0 1px, transparent 1px 3px);
+  }
+
+  /* the three buttons, in the classic arc */
+  .buttons { display: flex; justify-content: center; gap: 22px; margin-top: 22px; }
+  .btn {
+    width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+    background: radial-gradient(70% 70% at 35% 28%, #ff8b7d 0%, var(--coral) 46%, var(--coral-lo) 100%);
+    box-shadow:
+      inset 0 2px 0 rgba(255,255,255,.6),
+      inset 0 -4px 8px rgba(0,0,0,.3),
+      0 5px 0 var(--coral-lo),
+      0 8px 14px rgba(0,0,0,.45);
+    color: #fff2ef; font-family: var(--mono); font-size: 11px; font-weight: 700;
+    letter-spacing: .08em;
+    transition: transform .06s ease, box-shadow .06s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn:active:not(:disabled), .btn.pressed {
+    transform: translateY(4px);
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.45), 0 1px 0 var(--coral-lo), 0 2px 5px rgba(0,0,0,.4);
+  }
+  .btn:disabled { filter: grayscale(.55) brightness(.75); cursor: default; }
+  .btn small { display: block; font-size: 7px; letter-spacing: .18em; opacity: .8; font-weight: 400; }
+
+  /* speaker grille + power LED, purely decorative but the object needs them */
+  .underside { display: flex; align-items: center; justify-content: space-between; margin: 16px 14px 0; }
+  .grille { display: grid; grid-template-columns: repeat(6, 4px); gap: 4px; }
+  .grille i { width: 4px; height: 4px; border-radius: 50%; background: rgba(4,44,42,.42);
+              box-shadow: inset 0 1px 0 rgba(255,255,255,.25); }
+  .led {
+    width: 9px; height: 9px; border-radius: 50%; background: #4b6f2c;
+    box-shadow: inset 0 0 2px rgba(0,0,0,.6);
+  }
+  .led.on { background: #8dff5e; box-shadow: 0 0 8px #8dff5eaa, inset 0 0 2px rgba(0,0,0,.4); }
+  .led.warn { background: #ffc24d; box-shadow: 0 0 8px #ffc24d99, inset 0 0 2px rgba(0,0,0,.4); }
+
+  .devicefoot {
+    margin-top: 16px; text-align: center;
+    font-family: var(--mono); font-size: 9px; letter-spacing: .2em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .devicefoot kbd {
+    font-family: var(--mono); font-size: 9px; color: var(--ink-dim);
+    border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px;
+  }
+
+  /* ── paper slips ──────────────────────────────────────────────────────── */
+  .slips { display: flex; flex-direction: column; gap: 20px; }
+  .slip {
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,.008));
+    padding: 18px 20px 20px;
+  }
+  .slip > h2 {
+    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .26em;
+    text-transform: uppercase; color: var(--ink-dim);
+    margin: 0 0 14px; padding-bottom: 9px; border-bottom: 1px solid var(--rule);
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  }
+  .slip > h2 em { font-style: normal; font-family: var(--serif); font-size: 12px;
+                  letter-spacing: 0; text-transform: none; color: var(--ink-faint); }
+
+  label {
+    display: block; font-family: var(--mono); font-size: 9px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--ink-faint); margin: 12px 0 5px;
+  }
+  label:first-of-type { margin-top: 0; }
+  input, select {
+    width: 100%; padding: 9px 11px;
+    background: rgba(0,0,0,.32); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 2px;
+    font-family: var(--mono); font-size: 12px; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--shell); box-shadow: 0 0 0 2px rgba(94,200,193,.14); }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .row > .slim { flex: 0 0 auto; }
+
+  .press {
+    cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; font-weight: 700;
+    color: var(--ink); background: rgba(255,255,255,.05);
+    border: 1px solid var(--rule); border-radius: 2px; padding: 9px 13px;
+    transition: background .15s ease, border-color .15s ease, color .15s ease;
+  }
+  .press:hover:not(:disabled) { border-color: var(--shell); color: var(--shell-hi); }
+  .press:disabled { opacity: .38; cursor: default; }
+  .press.hot { border-color: rgba(255,91,74,.5); color: #ffb9b0; }
+  .press.hot:hover:not(:disabled) { border-color: var(--coral); color: #fff; background: rgba(255,91,74,.12); }
+
+  .hint { font-size: 12.5px; color: var(--ink-faint); margin-top: 9px; line-height: 1.5; }
+  .hint b { color: var(--ink-dim); font-weight: 400; }
+
+  .console {
+    margin-top: 14px; padding: 10px 12px; border-radius: 2px;
+    border: 1px solid var(--rule); border-left: 2px solid var(--rule);
+    background: rgba(0,0,0,.3);
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--ink-dim);
+    white-space: pre-wrap; word-break: break-word; max-height: 190px; overflow: auto;
+  }
+  .console.ok  { border-left-color: #6fbf5e; color: #cfe9c6; }
+  .console.err { border-left-color: var(--coral); color: #ffc9c2; }
+
+  /* data lists */
+  .board { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .board li {
+    display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: baseline;
+    padding: 7px 0; border-bottom: 1px dotted var(--rule);
+    font-family: var(--mono); font-size: 11.5px;
+  }
+  .board li:last-child { border-bottom: none; }
+  .rank { color: var(--ink-faint); }
+  .who { color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; }
+  .who.me { color: var(--shell-hi); }
+  .amt { color: var(--ink); }
+  .empty { color: var(--ink-faint); font-family: var(--serif); font-style: italic; font-size: 13px; }
+
+  .feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px;
+          max-height: 300px; overflow: auto; }
+  .feed li { font-size: 13.5px; color: var(--ink-dim); padding-left: 15px; position: relative; line-height: 1.5; }
+  .feed li::before { content: "·"; position: absolute; left: 0; color: var(--shell); }
+  .feed li:first-child { color: var(--ink); }
+
+  .traits { display: flex; flex-wrap: wrap; gap: 7px; }
+  .traits span {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
+    padding: 4px 9px; border: 1px solid var(--rule); border-radius: 2px; color: var(--ink-faint);
+  }
+  .traits span.lit { border-color: rgba(255,91,74,.45); color: #ffb9b0; }
+
+  .kv { display: flex; justify-content: space-between; gap: 12px; font-family: var(--mono);
+        font-size: 11px; color: var(--ink-faint); padding: 5px 0; border-bottom: 1px dotted var(--rule); }
+  .kv:last-child { border-bottom: none; }
+  .kv b { color: var(--ink-dim); font-weight: 400; }
+
+  a { color: var(--shell); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>AiPet</h1>
+    <p class="tagline">A virtual pet that lives inside a contract on <b>GenLayer</b> — it reads the
+      real weather itself, and its lines are written by an LLM running on-chain.</p>
+  </header>
+
+  <div class="stage">
+
+    <!-- ── the toy ──────────────────────────────────────────────────────── -->
+    <div class="toybox">
+      <div class="device">
+        <div class="brandline"><span>AiPet</span><span id="modelTag">GEN-001</span></div>
+
+        <div class="bezel">
+          <div class="glass">
+            <canvas id="lcd" width="96" height="72" aria-label="Pet screen"></canvas>
+          </div>
+        </div>
+
+        <div class="buttons">
+          <button class="btn" id="btnA" disabled>A<small>select</small></button>
+          <button class="btn" id="btnB" disabled>B<small>enter</small></button>
+          <button class="btn" id="btnC" disabled>C<small>back</small></button>
+        </div>
+
+        <div class="underside">
+          <div class="grille"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="led" id="led" title="network"></div>
+        </div>
+      </div>
+
+      <p class="devicefoot">
+        <kbd>←</kbd> <kbd>→</kbd> select · <kbd>enter</kbd> confirm · <kbd>esc</kbd> back
+      </p>
+
+      <!-- read out for screen readers and for anyone who wants the text -->
+      <p class="devicefoot" id="srOut" style="text-transform:none;letter-spacing:0;font-family:var(--serif);font-size:13px;color:var(--ink-faint)" aria-live="polite"></p>
+    </div>
+
+    <!-- ── the paper ────────────────────────────────────────────────────── -->
+    <div class="slips">
+
+      <div class="slip">
+        <h2>Connection <em>which pet, which chain</em></h2>
+        <label for="net">Network</label>
+        <select id="net">
+          <option value="testnetBradbury">Testnet Bradbury</option>
+          <option value="studionet">Studio (hosted)</option>
+          <option value="localnet">Localnet (localhost:4000)</option>
+        </select>
+        <label for="addr">Pet contract</label>
+        <input id="addr" placeholder="0x…" spellcheck="false" />
+        <label for="pk">Account key <span style="text-transform:none;letter-spacing:0">— for transactions</span></label>
+        <div class="row">
+          <input id="pk" placeholder="0x… or generate one" spellcheck="false" />
+          <button class="press slim" id="gen">New</button>
+        </div>
+        <p class="hint">Kept in this browser only. On testnet it needs GEN from the
+          <a href="https://testnet-faucet.genlayer.foundation" target="_blank" rel="noopener">faucet</a>
+          before the pet will listen to you. Reading works without any of that.</p>
+        <div class="row" style="margin-top:14px">
+          <button class="press hot" id="connect">Connect</button>
+          <button class="press" id="refresh" disabled>Refresh</button>
+        </div>
+        <div id="status" class="console">Not connected.</div>
+      </div>
+
+      <div class="slip">
+        <h2>Supplies <em>what the buttons spend</em></h2>
+        <label for="feedAmt">GEN per feeding</label>
+        <input id="feedAmt" type="number" min="0" step="0.01" value="0.05" />
+        <label for="visitAddr">Another pet to visit <span style="text-transform:none;letter-spacing:0">— owner only</span></label>
+        <input id="visitAddr" placeholder="0x… another pet's contract" spellcheck="false" />
+        <p class="hint">Your pet reads that contract, greets it by name, and its line is delivered
+          there as a consensus message. The other pet must already be finalized on-chain.</p>
+      </div>
+
+      <div class="slip" id="charBox" hidden>
+        <h2>Character <em>what living added</em></h2>
+        <div class="traits" id="traits"></div>
+        <p class="hint" id="charHint"></p>
+        <div class="row" id="charControls" hidden style="margin-top:12px">
+          <button class="press" id="freeze">Freeze</button>
+          <button class="press" id="forget">Reset</button>
+        </div>
+      </div>
+
+      <div class="slip" id="ownerBox" hidden>
+        <h2>Owner <em>the food money</em></h2>
+        <div class="kv"><span>held by the contract</span><b id="balMeta">— GEN</b></div>
+        <label for="wdAmt">Withdraw</label>
+        <div class="row">
+          <input id="wdAmt" type="number" min="0" step="0.01" value="0.1" />
+          <button class="press slim" id="withdraw">Take it</button>
+        </div>
+        <p class="hint">The payout settles when the transaction <b>finalizes</b> — about half an
+          hour on Bradbury. The balance stays put until then; that is not a failure.</p>
+      </div>
+
+      <div class="slip">
+        <h2>Fed by <em>who kept it alive</em></h2>
+        <ol class="board" id="board"><li class="empty">nobody has fed the pet yet</li></ol>
+      </div>
+
+      <div class="slip">
+        <h2>Directory <em>every pet, one board</em></h2>
+        <div class="row">
+          <input id="factoryAddr" placeholder="0x… directory contract" spellcheck="false" />
+          <button class="press slim" id="loadDir">Load</button>
+        </div>
+        <p class="hint" id="dirMeta"></p>
+        <ol class="board" id="directory" style="margin-top:10px"><li class="empty">no directory loaded</li></ol>
+        <button class="press" id="joinDir" style="width:100%;margin-top:12px" disabled>Register this pet</button>
+      </div>
+
+      <div class="slip">
+        <h2>Everything it has said</h2>
+        <ul class="feed" id="history"><li class="empty">nothing yet</li></ul>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { createClient, createAccount, generatePrivateKey } from "https://esm.sh/genlayer-js@1.1.8";
+import * as chains from "https://esm.sh/genlayer-js@1.1.8/chains";
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PART 1 — the screen
+//
+// Everything inside the glass is drawn one pixel at a time onto a 96×72 canvas:
+// the font, the pet, the icons, the bars. Nothing here is a webfont pretending
+// to be an LCD, which is the tell that gives away every "retro" UI on the web.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const W = 96, H = 72;
+const lcd = document.getElementById("lcd");
+const ctx = lcd.getContext("2d");
+const INK = "#17200c";
+
+// ── a 5×7 bitmap font, written as what it draws ───────────────────────────
+const GLYPHS = {
+  A:".###./#...#/#...#/#####/#...#/#...#/#...#", B:"####./#...#/#...#/####./#...#/#...#/####.",
+  C:".###./#...#/#..../#..../#..../#...#/.###.", D:"####./#...#/#...#/#...#/#...#/#...#/####.",
+  E:"#####/#..../#..../####./#..../#..../#####", F:"#####/#..../#..../####./#..../#..../#....",
+  G:".###./#...#/#..../#.###/#...#/#...#/.####", H:"#...#/#...#/#...#/#####/#...#/#...#/#...#",
+  I:".###./..#../..#../..#../..#../..#../.###.", J:"..###/...#./...#./...#./...#./#..#./.##..",
+  K:"#...#/#..#./#.#../##.../#.#../#..#./#...#", L:"#..../#..../#..../#..../#..../#..../#####",
+  M:"#...#/##.##/#.#.#/#.#.#/#...#/#...#/#...#", N:"#...#/##..#/#.#.#/#..##/#...#/#...#/#...#",
+  O:".###./#...#/#...#/#...#/#...#/#...#/.###.", P:"####./#...#/#...#/####./#..../#..../#....",
+  Q:".###./#...#/#...#/#...#/#.#.#/#..#./.##.#", R:"####./#...#/#...#/####./#.#../#..#./#...#",
+  S:".####/#..../#..../.###./....#/....#/####.", T:"#####/..#../..#../..#../..#../..#../..#..",
+  U:"#...#/#...#/#...#/#...#/#...#/#...#/.###.", V:"#...#/#...#/#...#/#...#/#...#/.#.#./..#..",
+  W:"#...#/#...#/#...#/#.#.#/#.#.#/##.##/#...#", X:"#...#/.#.#./..#../..#../..#../.#.#./#...#",
+  Y:"#...#/.#.#./..#../..#../..#../..#../..#..", Z:"#####/....#/...#./..#../.#.../#..../#####",
+  0:".###./#..##/#.#.#/#.#.#/##..#/#...#/.###.", 1:"..#../.##../..#../..#../..#../..#../.###.",
+  2:".###./#...#/....#/...#./..#../.#.../#####", 3:"#####/...#./..##./....#/....#/#...#/.###.",
+  4:"...#./..##./.#.#./#..#./#####/...#./...#.", 5:"#####/#..../####./....#/....#/#...#/####.",
+  6:"..##./.#.../#..../####./#...#/#...#/.###.", 7:"#####/....#/...#./..#../.#.../.#.../.#...",
+  8:".###./#...#/#...#/.###./#...#/#...#/.###.", 9:".###./#...#/#...#/.####/....#/...#./.##..",
+  " ":"...../...../...../...../...../...../.....", ".":"...../...../...../...../...../..##./..##.",
+  ",":"...../...../...../...../..##./..#../.#...", ":":"...../..##./..##./...../..##./..##./.....",
+  "!":"..#../..#../..#../..#../..#../...../..#..", "?":".###./#...#/....#/..##./..#../...../..#..",
+  "-":"...../...../...../.###./...../...../.....", "'":"..#../..#../...../...../...../...../.....",
+  "(":"...#./..#../.#.../.#.../.#.../..#../...#.", ")":".#.../..#../...#./...#./...#./..#../.#...",
+  "/":"....#/...#./...#./..#../.#.../.#.../#....", "%":"##..#/##.#./...#./..#../.#.../.#.##/#..##",
+  "+":"...../..#../..#../#####/..#../..#../.....", "=":"...../...../#####/...../#####/...../.....",
+  "<":"...#./..#../.#.../#..../.#.../..#../...#.", ">":".#.../..#../...#./....#/...#./..#../.#...",
+  "*":"...../#.#.#/.###./#####/.###./#.#.#/.....", "#":".#.#./#####/.#.#./#####/.#.#./...../.....",
+};
+const GLYPH_W = 5, GLYPH_H = 7, TRACK = 1;
+
+function px(x, y) {
+  if (x < 0 || y < 0 || x >= W || y >= H) return;
+  ctx.fillRect(x, y, 1, 1);
+}
+function drawGlyph(ch, x, y) {
+  const g = GLYPHS[ch] ?? GLYPHS["?"];
+  const rows = g.split("/");
+  for (let r = 0; r < rows.length; r++)
+    for (let c = 0; c < rows[r].length; c++)
+      if (rows[r][c] === "#") px(x + c, y + r);
+}
+/** Draw uppercase text. Returns the x it ended at. */
+function text(str, x, y) {
+  const s = String(str).toUpperCase();
+  for (let i = 0; i < s.length; i++) { drawGlyph(s[i], x, y); x += GLYPH_W + TRACK; }
+  return x;
+}
+const CHARS_PER_LINE = Math.floor((W - 2) / (GLYPH_W + TRACK));   // 15
+function textCentered(str, y) {
+  const s = String(str).toUpperCase().slice(0, CHARS_PER_LINE);
+  text(s, Math.max(0, Math.round((W - s.length * (GLYPH_W + TRACK) + TRACK) / 2)), y);
+}
+/** Greedy wrap into lines that fit the screen. */
+function wrap(str, width = CHARS_PER_LINE) {
+  const words = String(str).toUpperCase().split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    if (!line.length) { line = w.slice(0, width); continue; }
+    if (line.length + 1 + w.length <= width) line += " " + w;
+    else { lines.push(line); line = w.slice(0, width); }
+  }
+  if (line) lines.push(line);
+  return lines.length ? lines : [""];
+}
+
+// ── the pet, 16×16, one sprite per life stage ─────────────────────────────
+const SPRITES = {
+  egg: [
+    "................", ".....######.....", "....########....", "...####..####...",
+    "..#####..#####..", "..############..", ".#####..#######.", ".####..########.",
+    ".#############..", ".#####..#######.", "..######..#####.", "..############..",
+    "...##########...", "....########....", ".....######.....", "................",
+  ],
+  hatchling: [
+    "................", "......####......", ".....######.....", "....##.##.##....",
+    "....##.##.##....", "....########....", "...####..####...", "..#####..#####..",
+    "..############..", "..############..", "..############..", "...##########...",
+    "....##....##....", "...###....###...", "................", "................",
+  ],
+  kitten: [
+    "................", "..##........##..", "..###......###..", "..#.##....##.#..",
+    "..#..######..#..", ".##..........##.", ".#..##....##..#.", ".#..##....##..#.",
+    ".#............#.", ".#...######...#.", ".#....####....#.", "..#..........#..",
+    "...##########...", "....#..##..#....", "................", "................",
+  ],
+  adult: [
+    "..#..........#..", "..##........##..", "..#.#......#.#..", "..#..######..#..",
+    ".##..........##.", "##..##....##..##", "#...##....##...#", "##............##",
+    ".#....####....#.", ".#...######...#.", ".##..........##.", "..############..",
+    "..#..........#..", "...##########...", "....##....##....", "................",
+  ],
+  elder: [
+    "..#..........#..", "..##........##..", "..#.#......#.#..", "..#..######..#..",
+    ".##..........##.", "##..####..####.#", "#..............#", "##....####....##",
+    ".#....####....#.", ".#..##....##..#.", ".##..######..##.", "..############..",
+    "...#.#.#.#.#....", "...##########...", "....##....##....", "................",
+  ],
+  dead: [
+    "................", ".....######.....", "....########....", "...##########...",
+    "...##.####.##...", "...#.#.##.#.#...", "...##.####.##...", "...##########...",
+    "...##########...", "...###....###...", "...##########...", "...##########...",
+    "...##########...", "...#.##.##.#....", "................", "................",
+  ],
+};
+
+function drawSprite(name, x, y) {
+  const rows = SPRITES[name] ?? SPRITES.egg;
+  for (let r = 0; r < rows.length; r++)
+    for (let c = 0; c < rows[r].length; c++)
+      if (rows[r][c] === "#") px(x + c, y + r);
+}
+
+// ── 8×8 menu icons ────────────────────────────────────────────────────────
+const ICONS = {
+  feed:  ["........", "..####..", ".######.", "########", ".######.", "..####..", "...##...", "........"],
+  play:  ["..####..", ".#....#.", "#..##..#", "#.####.#", "#.####.#", "#..##..#", ".#....#.", "..####.."],
+  pet:   ["...#.#..", "..#.#.#.", "..#####.", ".######.", ".######.", "..####..", "...##...", "........"],
+  world: ["..####..", ".#.#..#.", "#..#...#", "#####..#", "#..#####", "#...#..#", ".#..#.#.", "..####.."],
+  visit: ["........", ".##..##.", "##.##.##", "##.##.##", ".##..##.", "..#..#..", ".###.###", "........"],
+  stats: ["........", "#.......", "#...##..", "#.####..", "#.####.#", "#.######", "#.######", "########"],
+  talk:  [".######.", "#......#", "#.#.#.##", "#......#", "#......#", ".####.#.", "...##...", "........"],
+  heart: ["........", ".##..##.", "########", "########", ".######.", "..####..", "...##...", "........"],
+};
+function drawIcon(name, x, y) {
+  const rows = ICONS[name] ?? ICONS.heart;
+  for (let r = 0; r < rows.length; r++)
+    for (let c = 0; c < rows[r].length; c++)
+      if (rows[r][c] === "#") px(x + c, y + r);
+}
+
+/** "there is more below" — drawn, not typed: a glyph key outside ASCII is the
+ *  kind of thing that survives one copy-paste and dies on the next. */
+function arrowDown(x, y) {
+  for (let r = 0; r < 3; r++) px(x + 2, y + r);
+  px(x, y + 3); px(x + 2, y + 3); px(x + 4, y + 3);
+  px(x + 1, y + 4); px(x + 2, y + 4); px(x + 3, y + 4);
+  px(x + 2, y + 5);
+}
+
+function box(x, y, w, h) {                       // 1px outline
+  for (let i = 0; i < w; i++) { px(x + i, y); px(x + i, y + h - 1); }
+  for (let j = 0; j < h; j++) { px(x, y + j); px(x + w - 1, y + j); }
+}
+function bar(x, y, w, value) {
+  // A meter has to read at a glance from across a desk, so the fill is three
+  // rows thick inside a 7-row box. One-row fills vanish behind the dot matrix.
+  box(x, y, w, 7);
+  const inner = w - 4;
+  const filled = Math.round(inner * Math.max(0, Math.min(100, value)) / 100);
+  for (let i = 0; i < filled; i++)
+    for (let r = 2; r <= 4; r++) px(x + 2 + i, y + r);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PART 2 — the two genlayer-js workarounds, both measured on Bradbury.
+// lib/gasBuffer.mjs and lib/waitForSettled.mjs hold the same logic for the Node
+// scripts and carry the full write-up. Keep the copies in step.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// 1. genlayer-js feeds the raw eth_estimateGas answer in as the gas limit, with
+//    no head-room, and on Bradbury that limit is too tight to execute with:
+//    pet() with the raw estimate (841 511) reverted after burning 803 864, while
+//    the same call with 4× head-room succeeded using only 795 361.
+const GAS_MULTIPLIER = 4n;
+const _fetch = window.fetch.bind(window);
+window.fetch = async (input, init) => {
+  const res = await _fetch(input, init);
+  if (typeof init?.body !== "string" || !init.body.includes("eth_estimateGas")) return res;
+  try {
+    if (JSON.parse(init.body).method !== "eth_estimateGas") return res;
+    const payload = await res.clone().json();
+    if (typeof payload.result !== "string") return res;
+    payload.result = "0x" + (BigInt(payload.result) * GAS_MULTIPLIER).toString(16);
+    return new Response(JSON.stringify(payload), { status: res.status, headers: res.headers });
+  } catch { return res; }
+};
+
+// 2. genlayer-js counts LEADER_TIMEOUT (13) and VALIDATORS_TIMEOUT (12) as decided
+//    states, so waitForTransactionReceipt() returns on them and calls a live
+//    transaction a failure. On Bradbury they are transient — consensus rotates the
+//    leader and the tx lands seconds later. Poll through them.
+const STATUS_NAME = {
+  1:"PENDING", 2:"PROPOSING", 3:"COMMITTING", 4:"REVEALING", 5:"ACCEPTED",
+  6:"UNDETERMINED", 7:"FINALIZED", 8:"CANCELED", 11:"READY TO FINALIZE",
+  12:"VALIDATORS TIMEOUT", 13:"LEADER TIMEOUT", 14:"LEADER REVEALING",
+};
+const FINAL = new Set(["5", "6", "7", "8"]);
+
+async function waitForSettled(client, hash, { onProgress, timeoutMs = 1200000 } = {}) {
+  const started = Date.now();
+  for (;;) {
+    const tx = await client.getTransaction({ hash });
+    const status = String(tx?.status ?? "");
+    onProgress?.(STATUS_NAME[Number(status)] ?? ("status " + status), Date.now() - started);
+    if (FINAL.has(status)) return tx;
+    // Bradbury has been seen sitting in PROPOSING for 10+ minutes under load;
+    // a short budget here reports a live transaction as a failure.
+    if (Date.now() - started > timeoutMs) throw new Error("timed out waiting for consensus");
+    await new Promise(r => setTimeout(r, 3000));
+  }
+}
+
+// 3. A contract revert arrives as viem's generic "Missing or invalid parameters."
+//    The real sentence — "pet is dead — call revive() to bring it back" — is
+//    buried in a multi-kilobyte hex dump on cause.data. Mirrors lib/revertReason.mjs.
+const FRAMING = new Set(["data","events","fingerprint","frames","func","module_name",
+  "module_instances","cpython","memories","softfloat","kind","UserError","VmError",
+  "storage_changes","genvm","stdout","stderr"]);
+
+function revertReason(err) {
+  const hex = err?.cause?.data ?? err?.data;
+  const fallback = err?.shortMessage || err?.message || String(err);
+  if (typeof hex !== "string") return fallback;
+  const clean = hex.replace(/^0x/, "");
+  if (!/^[0-9a-fA-F]+$/.test(clean) || clean.length % 2) return fallback;
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  // UTF-8, not byte-by-byte: the contract's messages contain em dashes, and
+  // splitting on them would cut the sentence in half.
+  const decoded = new TextDecoder("utf-8").decode(bytes);
+  const runs = (decoded.match(/[^\x00-\x1f\x7f-\x9f�]{4,}/g) || [])
+    .map(r => r.trim()).filter(r => !FRAMING.has(r));
+  return runs.sort((a, b) => b.length - a.length)[0] || fallback;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PART 3 — state
+// ═══════════════════════════════════════════════════════════════════════════
+
+const $ = (id) => document.getElementById(id);
+const LS = {
+  get a(){ return localStorage.getItem("aipet_addr") || ""; }, set a(v){ localStorage.setItem("aipet_addr", v); },
+  get k(){ return localStorage.getItem("aipet_pk") || ""; },   set k(v){ localStorage.setItem("aipet_pk", v); },
+  get n(){ return localStorage.getItem("aipet_net") || "testnetBradbury"; },
+  set n(v){ localStorage.setItem("aipet_net", v); },
+};
+
+let client = null, account = null, address = null;
+let busy = false, isOwner = false, alive = true, evolvingNow = true;
+let reviveCost = null, timeScale = 1;
+let pet = null, social = null, character = null;   // last state read from chain
+
+const short = (a) => a.slice(0, 6) + "…" + a.slice(-4);
+const fromWei = (w) => Number(BigInt(w || "0")) / 1e18;
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g,
+  c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+
+$("addr").value = LS.a; $("pk").value = LS.k; $("net").value = LS.n;
+$("visitAddr").value = localStorage.getItem("aipet_visit") || "";
+
+// ── a pet you can link to ─────────────────────────────────────────────────
+//
+// Without this the shortest honest instruction for a stranger is "run a server,
+// then paste this 42-character address" — two steps of setup before anything
+// happens. `?pet=0x…&dir=0x…&net=…` collapses both into a link.
+//
+// THE KEY IS NEVER IN THE URL, and that is not an oversight to be helpfully
+// fixed later: a URL is pasted into chats, kept in history, and handed to every
+// site you navigate to next as a referrer. The account key lives in this
+// browser's localStorage and nowhere else. A link carries only which pet to
+// look at — the reader arrives as a visitor and generates their own key.
+//
+// A link wins over whatever this browser remembers: someone who followed one is
+// asking to see THAT pet, not the last one they happened to open.
+const PARAMS = new URLSearchParams(location.search);
+const linked = {
+  pet: (PARAMS.get("pet") || "").trim(),
+  dir: (PARAMS.get("dir") || "").trim(),
+  net: (PARAMS.get("net") || "").trim(),
+};
+if (/^0x[0-9a-fA-F]{40}$/.test(linked.pet)) $("addr").value = linked.pet;
+if (/^0x[0-9a-fA-F]{40}$/.test(linked.dir)) $("factoryAddr").value = linked.dir;
+if (linked.net && $("net").querySelector(`option[value="${CSS.escape(linked.net)}"]`)) {
+  $("net").value = linked.net;
+}
+
+/** Keep the address bar holding a link worth copying. Called after a connect. */
+function refreshShareLink() {
+  if (!address) return;
+  const q = new URLSearchParams({ pet: address, net: $("net").value });
+  const dir = $("factoryAddr").value.trim();
+  if (/^0x[0-9a-fA-F]{40}$/.test(dir)) q.set("dir", dir);
+  history.replaceState(null, "", `${location.pathname}?${q}`);
+}
+
+// ── the menu the device actually offers ───────────────────────────────────
+// One entry per thing the contract can be asked to do, in the order a player
+// reaches for them. `owner` entries are hidden from everyone else, because the
+// contract rejects them anyway and a revert is a poor way to learn that.
+const MENU = [
+  { key: "feed",  icon: "feed",  label: "feed",  fn: "feed" },
+  { key: "play",  icon: "play",  label: "play",  fn: "play" },
+  { key: "pet",   icon: "pet",   label: "pet",   fn: "pet"  },
+  { key: "check", icon: "world", label: "world", fn: "check" },
+  { key: "visit", icon: "visit", label: "visit", fn: "visit", owner: true },
+  { key: "stats", icon: "stats", label: "stats", view: "stats" },
+  { key: "talk",  icon: "talk",  label: "talk",  view: "talk" },
+  { key: "char",  icon: "heart", label: "self",  view: "char" },
+];
+function menuItems() { return MENU.filter(m => !m.owner || isOwner); }
+
+const ui = {
+  cursor: 0,          // index into menuItems()
+  view: "home",       // home | stats | talk | char | busy | dead | confirm
+  frame: 0,           // animation tick
+  scroll: 0,          // line offset for long text
+  message: "",        // one line under the pet
+  pending: null,      // the menu entry awaiting confirmation
+  progress: "",       // what consensus is doing right now
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PART 4 — rendering the screen
+// ═══════════════════════════════════════════════════════════════════════════
+
+function spriteFor() {
+  if (!pet) return "egg";
+  if (!alive) return "dead";
+  const stage = String(pet.stage || "egg");
+  if (stage === "egg") return "egg";
+  if (stage === "hatchling") return "hatchling";
+  if (stage === "kitten") return "kitten";
+  if (stage === "elder") return "elder";
+  return "adult";
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = INK;
+
+  drawMenuBar();
+
+  if (!client)               drawSplash();
+  else if (ui.view === "busy")    drawBusy();
+  else if (ui.view === "confirm") drawConfirm();
+  else if (!alive)                drawDead();
+  else if (ui.view === "stats")   drawStats();
+  else if (ui.view === "talk")    drawTalk();
+  else if (ui.view === "char")    drawChar();
+  else                            drawHome();
+
+  drawFooter();
+}
+
+function drawMenuBar() {
+  const items = menuItems();
+  const slot = Math.floor(W / Math.max(1, items.length));
+  items.forEach((m, i) => {
+    const x = i * slot + Math.floor((slot - 8) / 2);
+    drawIcon(m.icon, x, 1);
+    if (i === ui.cursor && client && ui.view !== "busy") {
+      // the selected icon gets the classic pointer underneath
+      for (let k = 0; k < 8; k++) px(x + k, 10);
+    }
+  });
+  for (let x = 0; x < W; x += 2) px(x, 12);     // dotted rule under the strip
+}
+
+function drawFooter() {
+  for (let x = 0; x < W; x += 2) px(x, 60);
+  const items = menuItems();
+  const label = ui.progress || ui.message ||
+    (client ? (items[ui.cursor]?.label ?? "") : "connect first");
+  textCentered(label.slice(0, CHARS_PER_LINE), 63);
+}
+
+function drawSplash() {
+  // deliberately quiet: an egg, a name, and the footer telling you what to do.
+  // Saying "press connect" twice on one small screen is how screens get noisy.
+  drawSprite("egg", 40, 22 + (ui.frame % 2));
+  textCentered("aipet", 44);
+  for (let x = 30; x < 66; x += 2) px(x, 53);
+}
+
+function drawHome() {
+  const bob = ui.frame % 2;                      // the classic 1px bob
+  drawSprite(spriteFor(), 40, 20 + bob);
+  textCentered(String(pet?.name || "").slice(0, CHARS_PER_LINE), 40);
+  // three short meters, unlabelled — the shapes are learned in two seconds
+  bar(8, 48, 24, Number(pet?.satiety ?? 0));
+  bar(36, 48, 24, Number(pet?.mood ?? 0));
+  bar(64, 48, 24, Number(pet?.health ?? 0));
+  // a heart marks the guest nobody has answered yet
+  if (social && String(social.pending_name || "").trim()) drawIcon("heart", 84, 20);
+}
+
+function drawStats() {
+  // rows are 9px apart and the last one ends at y=59, one pixel clear of the
+  // footer rule — a glyph is 7 tall, so 56 would have crossed it
+  text("full", 2, 15); bar(32, 15, 62, Number(pet?.satiety ?? 0));
+  text("mood", 2, 24); bar(32, 24, 62, Number(pet?.mood ?? 0));
+  text("well", 2, 33); bar(32, 33, 62, Number(pet?.health ?? 0));
+  text(`${pet?.stage ?? "-"} ${Number(pet?.age_days ?? 0)}d`, 2, 43);
+  // the market as the contract reports it: a category, never a price
+  text(`sky ${String(pet?.market || "-").slice(0, 8)}`, 2, 52);
+}
+
+function drawTalk() {
+  const quote = String(pet?.last_quote || "").trim();
+  const lines = wrap(quote || "it has not spoken yet");
+  const visible = 5;
+  ui.scroll = Math.min(ui.scroll, Math.max(0, lines.length - visible));
+  for (let i = 0; i < visible; i++) {
+    const line = lines[ui.scroll + i];
+    if (line) text(line, 2, 16 + i * 8);
+  }
+  // an arrow while there is more to read, so pressing A means something obvious
+  if (ui.scroll + visible < lines.length) arrowDown(89, 51);
+}
+
+function drawChar() {
+  const phrase = String(pet?.character || "").trim();
+  const lines = wrap(phrase || "no character yet");
+  lines.slice(0, 2).forEach((l, i) => text(l, 2, 16 + i * 8));
+  const friends = Number(social?.friends ?? 0);
+  const sent = Number(social?.visits_sent ?? 0), got = Number(social?.visits_received ?? 0);
+  text(`friends ${friends}`, 2, 36);
+  text(`out ${sent} in ${got}`, 2, 44);
+  const guest = String(social?.pending_name || "").trim();
+  if (guest) text(`${guest.slice(0, 9)} came`, 2, 52);
+}
+
+function drawDead() {
+  const bob = ui.frame % 2;
+  drawSprite("dead", 40, 18 + bob);
+  textCentered("it went quiet", 38);
+  textCentered(reviveCost !== null
+    ? `revive ${fromWei(reviveCost).toFixed(2)} gen` : "revive?", 48);
+}
+
+function drawBusy() {
+  // the pet keeps living while consensus thinks — a frozen screen reads as broken
+  const bob = ui.frame % 2;
+  drawSprite(spriteFor(), 40, 18 + bob);
+  const dots = ".".repeat(ui.frame % 4);
+  textCentered("working" + dots, 42);
+  const filled = (ui.frame % 12) * 9;
+  bar(8, 50, 80, Math.min(100, filled));
+}
+
+function drawConfirm() {
+  const m = ui.pending;
+  drawIcon(m?.icon ?? "heart", 44, 18);
+  textCentered(m?.label ?? "", 30);
+  const detail = m?.key === "feed" ? `${$("feedAmt").value} gen`
+    : m?.key === "visit" ? short($("visitAddr").value.trim() || "0x0000000000")
+    : m?.key === "revive" ? `${fromWei(reviveCost ?? 0n).toFixed(2)} gen` : "";
+  if (detail) textCentered(detail, 40);
+  textCentered("b = yes  c = no", 50);
+}
+
+// draw at ~7fps: fast enough to feel alive, slow enough to look mechanical
+setInterval(() => { ui.frame++; render(); }, 140);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PART 5 — the buttons
+// ═══════════════════════════════════════════════════════════════════════════
+
+// A short square beep, synthesised. No audio files, and silent until asked for.
+let audio = null;
+function beep(freq = 660, ms = 45) {
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audio.createOscillator(), gain = audio.createGain();
+    osc.type = "square"; osc.frequency.value = freq;
+    gain.gain.value = 0.03;
+    osc.connect(gain).connect(audio.destination);
+    osc.start(); osc.stop(audio.currentTime + ms / 1000);
+  } catch { /* audio is a nicety, never a requirement */ }
+}
+
+function flash(btn) {
+  const el = $(btn);
+  el.classList.add("pressed");
+  setTimeout(() => el.classList.remove("pressed"), 90);
+}
+
+function pressA() {                              // cycle the menu
+  flash("btnA"); beep(720, 30);
+  if (!client) return;
+  if (ui.view === "talk") {
+    // A pages the quote and wraps back to the top, so a long line can be
+    // re-read without leaving the screen and coming back
+    const lines = wrap(String(pet?.last_quote || "").trim() || "it has not spoken yet");
+    ui.scroll = ui.scroll + 5 >= lines.length ? 0 : ui.scroll + 1;
+    return;
+  }
+  const items = menuItems();
+  ui.cursor = (ui.cursor + 1) % items.length;
+  ui.view = "home"; ui.scroll = 0; ui.message = "";
+}
+
+function pressB() {                              // confirm
+  flash("btnB"); beep(900, 40);
+  if (!client) { $("connect").focus(); return; }
+
+  if (!alive) {                                  // a dead pet offers one thing
+    ui.pending = { key: "revive", label: "revive", icon: "heart" };
+    ui.view = "confirm";
+    return;
+  }
+  if (ui.view === "confirm") { runPending(); return; }
+
+  const m = menuItems()[ui.cursor];
+  if (!m) return;
+  if (m.view) { ui.view = m.view; ui.scroll = 0; return; }
+  ui.pending = m; ui.view = "confirm";
+}
+
+function pressC() {                              // back
+  flash("btnC"); beep(420, 40);
+  ui.view = "home"; ui.pending = null; ui.scroll = 0; ui.message = "";
+}
+
+$("btnA").onclick = pressA;
+$("btnB").onclick = pressB;
+$("btnC").onclick = pressC;
+
+document.addEventListener("keydown", (e) => {
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "")) return;
+  if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); pressA(); }
+  else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+    e.preventDefault(); flash("btnA"); beep(720, 30);
+    if (!client) return;
+    const items = menuItems();
+    ui.cursor = (ui.cursor - 1 + items.length) % items.length;
+    ui.view = "home"; ui.scroll = 0;
+  }
+  else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pressB(); }
+  else if (e.key === "Escape") { e.preventDefault(); pressC(); }
+});
+
+async function runPending() {
+  const m = ui.pending;
+  ui.pending = null;
+  if (!m) return;
+
+  if (m.key === "revive") {
+    if (reviveCost === null) { setStatus("State not loaded yet — hit Refresh.", "err"); return; }
+    await doAction("revive", { value: reviveCost, label: fromWei(reviveCost).toFixed(3) + " GEN" });
+    return;
+  }
+  if (m.key === "visit") {
+    const host = $("visitAddr").value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(host)) {
+      setStatus("Put the other pet's contract address in Supplies first.", "err");
+      ui.message = "no address"; ui.view = "home"; return;
+    }
+    if (host.toLowerCase() === address.toLowerCase()) {
+      setStatus("A pet cannot visit itself.", "err"); ui.message = "not itself"; ui.view = "home"; return;
+    }
+    localStorage.setItem("aipet_visit", host);
+    const ok = await doAction("visit", { args: [host], label: short(host) });
+    // The greeting is a separate consensus message that runs inside the OTHER
+    // contract, so nothing here can confirm it — point at where it will show up.
+    if (ok) setStatus("Visit accepted ✓\nYour pet's line is on its way to " + short(host)
+      + " as a consensus message. Load that pet's address here in a minute to see it arrive.", "ok");
+    return;
+  }
+  await doAction(m.fn);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PART 6 — talking to the chain
+// ═══════════════════════════════════════════════════════════════════════════
+
+function setStatus(msg, kind = "") {
+  const el = $("status");
+  el.textContent = msg;
+  el.className = "console" + (kind ? " " + kind : "");
+  $("srOut").textContent = msg.split("\n")[0];
+}
+
+function setBusy(b) {
+  busy = b;
+  const dead = !alive;
+  for (const id of ["btnA", "btnB", "btnC"]) $(id).disabled = b || !client;
+  $("refresh").disabled = b || !client;
+  $("connect").disabled = b;
+  $("withdraw").disabled = b || !client || !isOwner;
+  $("freeze").disabled = b || !client || !isOwner;
+  $("forget").disabled = b || !client || !isOwner;
+  $("charControls").hidden = !isOwner;
+  if (dead && ui.view !== "busy" && ui.view !== "confirm") ui.view = "home";
+}
+
+function toWei(genStr) {
+  const g = parseFloat(genStr || "0");
+  if (!isFinite(g) || g <= 0) return 0n;
+  return BigInt(Math.round(g * 1e9)) * (10n ** 9n);   // 9 decimals of precision
+}
+
+const BOARD_LIMIT = 5, DIR_LIMIT = 20;
+const read = (fn, args = []) => client.readContract({ address, functionName: fn, args });
+
+$("gen").onclick = () => { $("pk").value = generatePrivateKey(); };
+
+$("connect").onclick = async () => {
+  try {
+    setBusy(true);
+    address = $("addr").value.trim();
+    if (!address.startsWith("0x")) throw new Error("Enter the pet contract address (0x…)");
+    let pk = $("pk").value.trim();
+    if (!pk) { pk = generatePrivateKey(); $("pk").value = pk; }
+    const netKey = $("net").value;
+    const chain = chains[netKey];
+    if (!chain) throw new Error("Unknown network: " + netKey);
+
+    LS.a = address; LS.k = pk; LS.n = netKey;
+    account = createAccount(pk);
+    client = createClient({ chain, account });
+
+    setStatus("Connected to " + netKey + ".\nAccount " + (account.address || "(hidden)"), "ok");
+    $("refresh").disabled = false;
+    refreshShareLink();
+    await loadState();
+    if ($("factoryAddr").value.trim()) loadDirectory({});
+    startAutoRefresh();
+  } catch (e) {
+    client = null;
+    stopAutoRefresh();
+    setStatus("Connection error: " + (e?.message || e), "err");
+  } finally { setBusy(false); }
+};
+
+$("refresh").onclick = () => loadState();
+
+$("withdraw").onclick = async () => {
+  const wei = toWei($("wdAmt").value);
+  if (wei <= 0n) { setStatus("Enter an amount above 0.", "err"); return; }
+  const ok = await doAction("withdraw", { args: [wei], label: $("wdAmt").value + " GEN" });
+  // The payout is a message consensus dispatches at FINALIZED, so the balance does
+  // not move on acceptance. Without saying so, a working withdraw looks broken.
+  if (ok) setStatus("Withdraw accepted ✓\nThe transfer settles when the transaction finalizes — "
+    + "about half an hour on Bradbury. The contract balance stays put until then.", "ok");
+};
+
+$("freeze").onclick = () => doAction("set_evolution", {
+  args: [!evolvingNow], label: evolvingNow ? "freeze" : "unfreeze",
+});
+$("forget").onclick = () => doAction("reset_character", { label: "reset" });
+
+async function doAction(fn, opts = {}) {
+  if (!client) return false;
+  const prevView = ui.view;
+  try {
+    setBusy(true);
+    ui.view = "busy"; ui.progress = "sending";
+    const value = opts.value ?? (fn === "feed" ? toWei($("feedAmt").value) : 0n);
+    const label = opts.label ?? (fn === "feed" ? $("feedAmt").value + " GEN" : "");
+    setStatus(`Sending ${fn}()${label ? " (" + label + ")" : ""}…\n`
+      + "Waiting for consensus — the web request and the LLM take a while.");
+    const hash = await client.writeContract({ address, functionName: fn, args: opts.args ?? [], value });
+    // Wait for ACCEPTED, not FINALIZED: state is applied at acceptance, while
+    // finalization takes far longer. A real check() spends 40-60 s on the web
+    // request plus the LLM, and a leader rotation adds another round on top.
+    const tx = await waitForSettled(client, hash, {
+      onProgress: (name, ms) => {
+        ui.progress = name.toLowerCase().slice(0, CHARS_PER_LINE);
+        setStatus(`tx ${hash}\n${name} — ${(ms / 1000).toFixed(0)}s`);
+      },
+    });
+    if (String(tx.status) !== "5" && String(tx.status) !== "7")
+      throw new Error(`consensus ended as ${STATUS_NAME[Number(tx.status)] ?? tx.status}`);
+    setStatus(`${fn}() done ✓`, "ok");
+    ui.message = fn === "feed" ? "yum" : "done";
+    await loadState();
+    ui.view = fn === "check" || fn === "play" || fn === "pet" || fn === "feed" ? "talk" : "home";
+    ui.scroll = 0;
+    beep(1180, 70);
+    return true;
+  } catch (e) {
+    const reason = revertReason(e);
+    setStatus(`${fn}() failed:\n${reason}`, "err");
+    ui.message = reason.slice(0, CHARS_PER_LINE).toLowerCase();
+    ui.view = prevView === "busy" ? "home" : prevView;
+    beep(180, 160);
+    return false;
+  } finally { ui.progress = ""; setBusy(false); }
+}
+
+// ── auto-refresh ──────────────────────────────────────────────────────────
+// The pet drifts with elapsed time and anyone may feed a community pet, so a page
+// that only updates on click shows a lie the moment you stop clicking. Polling is
+// the only option — events exist but there is no historical feed to subscribe to.
+// So poll politely: never over an action in flight, never on a hidden tab, never
+// stacking requests, and no faster than the state can actually change.
+let pollTimer = null, tickTimer = null, polling = false, lastOkAt = 0, stale = false;
+
+function pollDelay() {
+  // One in-pet hour of drift takes 3600/time_scale real seconds. A demo pet at
+  // 3600 moves every second; a real-time pet once an hour — but even then someone
+  // else's feed can land at any moment, hence the 30 s ceiling.
+  return Math.min(30000, Math.max(2000, (3600 / Math.max(1, timeScale)) * 1000));
+}
+function renderLive() {
+  const led = $("led");
+  if (!client) { led.className = "led"; return; }
+  led.className = "led " + (document.hidden ? "" : stale ? "warn" : "on");
+  const ago = lastOkAt ? Math.round((Date.now() - lastOkAt) / 1000) : null;
+  led.title = stale ? "cannot reach the network"
+    : ago === null ? "waiting" : `updated ${ago}s ago`;
+}
+async function pollTick() {
+  clearTimeout(pollTimer);
+  if (!client) return;
+  if (!busy && !document.hidden && !polling) {
+    polling = true;
+    try { await loadState({ quiet: true }); } finally { polling = false; }
+  }
+  pollTimer = setTimeout(pollTick, pollDelay());
+}
+function startAutoRefresh() {
+  stopAutoRefresh();
+  pollTimer = setTimeout(pollTick, pollDelay());
+  tickTimer = setInterval(renderLive, 1000);
+  renderLive();
+}
+function stopAutoRefresh() { clearTimeout(pollTimer); clearInterval(tickTimer); pollTimer = tickTimer = null; }
+document.addEventListener("visibilitychange", () => {
+  renderLive();
+  if (!document.hidden && client) pollTick();
+});
+
+async function loadState(opts = {}) {
+  const quiet = opts.quiet === true;
+  try {
+    const [s, hist, board, owner, bal, soc, char] = await Promise.all([
+      read("get_state"), read("get_history"), read("get_top_feeders", [BOARD_LIMIT]),
+      read("get_owner"), read("get_balance"), read("get_social"), read("get_character"),
+    ]);
+    pet = s; social = soc; character = char;
+    reviveCost = BigInt(s.revive_cost_wei ?? "0");
+    alive = s.alive !== false;
+    timeScale = Number(s.time_scale) || 1;
+    evolvingNow = char?.evolving !== false;
+
+    const me = (account?.address || "").toLowerCase();
+    isOwner = !!me && String(owner || "").toLowerCase() === me;
+
+    $("modelTag").textContent = timeScale > 1 ? `GEN-${timeScale}×` : "GEN-001";
+    $("ownerBox").hidden = !isOwner;
+    $("charControls").hidden = !isOwner;
+    $("balMeta").textContent = fromWei(bal).toFixed(3) + " GEN";
+    $("freeze").textContent = evolvingNow ? "Freeze" : "Unfreeze";
+
+    renderCharacter(char);
+
+    const rows = Array.isArray(board) ? board : [];
+    $("board").innerHTML = rows.length
+      ? rows.map((r, i) => `<li><span class="rank">${i + 1}</span>`
+          + `<span class="who${r.address.toLowerCase() === me ? " me" : ""}">${escapeHtml(short(r.address))}</span>`
+          + `<span class="amt">${fromWei(r.wei).toFixed(3)}</span></li>`).join("")
+      : `<li class="empty">nobody has fed the pet yet</li>`;
+
+    const list = Array.isArray(hist) ? hist : [];
+    $("history").innerHTML = list.length
+      ? list.slice().reverse().map(x => `<li>${escapeHtml(x)}</li>`).join("")
+      : `<li class="empty">nothing yet</li>`;
+
+    $("srOut").textContent = alive
+      ? `${s.name}: ${s.last_quote || "has not spoken yet"}`
+      : `${s.name} is not alive.`;
+
+    lastOkAt = Date.now(); stale = false;
+    if (!busy) setBusy(false);
+    renderLive();
+  } catch (e) {
+    if (quiet) {
+      // A background poll must not clobber the status line: it may be showing
+      // transaction progress or a revert the user still needs to read.
+      stale = true; renderLive(); return;
+    }
+    setStatus("Could not read state: " + (e?.message || e)
+      + "\nCheck the contract address and the network.", "err");
+  }
+}
+
+// The character sheet. Levels come from the contract, and so does max_level, so
+// the dots can never disagree with the ceiling the contract actually enforces.
+function renderCharacter(c) {
+  const traits = Array.isArray(c?.traits) ? c.traits : [];
+  $("charBox").hidden = traits.length === 0;
+  if (!traits.length) return;
+  const max = Number(c.max_level) || 5;
+  $("traits").innerHTML = traits.map(t => {
+    const level = Number(t.level) || 0;
+    return `<span class="${level ? "lit" : ""}">${escapeHtml(t.name)} `
+      + "●".repeat(level) + "○".repeat(Math.max(0, max - level)) + "</span>";
+  }).join("");
+  $("charHint").textContent = c.evolving
+    ? `Every line the pet speaks may nudge one trait, at most once per `
+      + `${Number(c.cooldown_hours)} in-pet hours. ${Number(c.evolutions) || 0} so far.`
+    : "The owner has frozen this character — experience no longer changes it.";
+}
+
+// ── the factory directory ─────────────────────────────────────────────────
+// A separate contract, so it loads on demand and its failures never touch the
+// pet: an unreachable factory must not make a healthy pet look broken.
+// A `?dir=` from the link was already put in the field above and outranks
+// whatever this browser remembers, so only fall back to storage when the field
+// is still empty — assigning unconditionally here would undo the link.
+let factoryAddress = $("factoryAddr").value.trim() || localStorage.getItem("aipet_factory") || "";
+$("factoryAddr").value = factoryAddress;
+
+$("loadDir").onclick = () => loadDirectory({ announce: true });
+$("joinDir").onclick = async () => {
+  if (!factoryAddress) { setStatus("Load a factory first.", "err"); return; }
+  const saved = address;
+  try {
+    // doAction() targets the pet; registering targets the factory, so swap the
+    // address for exactly one call and put it back whatever happens.
+    address = factoryAddress;
+    const ok = await doAction("register", { args: [saved], label: short(saved) });
+    if (ok) setStatus("Registered ✓ — the pet is on the shared leaderboard.", "ok");
+  } finally {
+    address = saved;
+    await loadDirectory({});
+  }
+};
+
+async function loadDirectory({ announce }) {
+  const addr = $("factoryAddr").value.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+    if (announce) setStatus("Enter the factory contract address (0x…).", "err");
+    return;
+  }
+  factoryAddress = addr;
+  localStorage.setItem("aipet_factory", addr);
+  refreshShareLink();          // a directory is worth carrying in the link too
+  try {
+    const [info, rows] = await Promise.all([
+      client.readContract({ address: addr, functionName: "get_info", args: [] }),
+      client.readContract({ address: addr, functionName: "get_leaderboard", args: [0, DIR_LIMIT] }),
+    ]);
+    const n = Number(info.pets);
+    $("dirMeta").textContent =
+      `${n} pet${n === 1 ? "" : "s"} registered · ${info.open_to_all ? "open to anyone" : "admin-only"}`;
+    const me = (address || "").toLowerCase();
+    $("directory").innerHTML = rows.length
+      ? rows.map((r, i) => `<li><span class="rank">${i + 1}</span>`
+          + `<span class="who${r.address.toLowerCase() === me ? " me" : ""}">`
+          + `${escapeHtml(r.name)} ${escapeHtml(short(r.address))}${r.alive ? "" : " ✝"}</span>`
+          + `<span class="amt">${fromWei(r.total_fed_wei).toFixed(3)}</span></li>`).join("")
+      : `<li class="empty">no pets registered yet</li>`;
+    const listed = rows.some(r => r.address.toLowerCase() === me);
+    $("joinDir").disabled = !client || !address || listed;
+    $("joinDir").textContent = listed ? "Already in this directory" : "Register this pet";
+    if (announce) setStatus(`Directory loaded — ${Number(info.pets)} pet(s).`, "ok");
+  } catch (e) {
+    $("directory").innerHTML = `<li class="empty">could not read that directory</li>`;
+    $("dirMeta").textContent = "";
+    $("joinDir").disabled = true;
+    if (announce) setStatus("Could not read the factory: " + revertReason(e), "err");
+  }
+}
+
+render();
+
+// A visitor who followed a link should land ON the pet, not on a form with a
+// button. Reading needs no funds and no key of its own, so connect straight
+// away whenever we already know which pet to show — from the link, or from the
+// last one this browser looked at. Anything that spends still waits for a
+// deliberate press.
+if (/^0x[0-9a-fA-F]{40}$/.test($("addr").value.trim())) $("connect").click();
+</script>
+</body>
+</html>

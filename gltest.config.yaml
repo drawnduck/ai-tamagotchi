@@ -1,0 +1,17 @@
+networks:
+  default: localnet
+
+  localnet:
+    url: "http://127.0.0.1:4000/api"
+
+  studionet: {}
+
+  testnet_bradbury:
+    # private key(s) read from .env (see .env.example)
+    accounts:
+      - "${ACCOUNT_PRIVATE_KEY_1}"
+
+paths:
+  contracts: "contracts"
+
+environment: .env

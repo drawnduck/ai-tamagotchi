@@ -1,0 +1,4 @@
+# Python tooling for testing & linting GenLayer Intelligent Contracts.
+# (The contract itself runs in GenVM, not in this interpreter.)
+genlayer-test>=0.25.0
+pytest>=8.0.0
