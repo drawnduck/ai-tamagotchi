@@ -15,8 +15,9 @@
     "demo:twopets": "node deploy/twoPets.mjs",
     "demo:persona": "node deploy/personaArc.mjs",
     "demo:factory": "node deploy/factoryArc.mjs",
-    "frontend": "node frontend/serve.mjs",
-    "test:network": "node --test tests/network/"
+    "frontend": "npm run build:site && node frontend/serve.mjs",
+    "test:network": "node --test tests/network/",
+    "build:site": "python3 tools/buildContract.py contracts/ai_pet.py -o frontend/ai_pet.py"
   },
   "dependencies": {
     "genlayer-js": "^1.1.8"

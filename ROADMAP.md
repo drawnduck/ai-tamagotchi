@@ -346,6 +346,8 @@ The distinction that matters: *written* ≠ *proven*.
 | **`gl.deploy_contract(on="accepted")` never gets a vote on Bradbury** *(from the removed spawn work)* | Every spawn using it ended `vote IDLE`: twice ACCEPTED-with-no-effect after ~130 s, once CANCELED, once stuck PENDING with 0 rounds for 20 min. Payload size is *not* the cause — a 521-byte deploy failed identically to a 28 920-byte one, and the same call always simulated fine and returned its CREATE2 address. Switching to the SDK default `on="finalized"` made the identical spawn settle in 10 s with vote AGREE. Note the contrast: `emit(on="accepted")` for a plain *message* works (that is how a visit's greeting is delivered) — this is specific to deployments |
 | **A client's `latest-final` read is NOT the same as a contract's `LATEST_FINAL` read** | Registering a freshly deployed pet kept failing while `client.readContract(pet, transactionHashVariant: "latest-final")` answered `get_state()` and `get_owner()` perfectly well — so the pet looked finalized and was not. Decoding the reverted call's `ReturnData` gave `invalid_contract absent_runner_comment`: from inside a contract, at finalized state, the callee's **code** was not there yet, so GenVM never started the sub-VM. The node will serve a finalized-flavoured view of a contract whose deploy is still ACCEPTED; a cross-contract call will not. The only honest poll for "can this call work yet" is a free `readContract` of the write method itself — `tools/registerWhenFinal.mjs` |
 | **A stranger cannot pose as a pet** | On Bradbury, `visit()` at a plain wallet address and `receive_visit` called *from* a wallet both revert. The wallet case never reaches the contract's own check: GenVM aborts the caller with `invalid_contract absent_runner_comment` while starting the sub-VM. Asserted in `tests/network/` |
+| **A wallet can create and feed a pet — no key given to the app** | `tools/proveWalletFlow.mjs` on 2026-08-12, with an EIP-1193 provider standing in for MetaMask: `client.account.type` came back `json-rpc` (not `local`), the deploy went out as wallet approval #1 and settled **ACCEPTED in 14 s**, and `feed()` with 0.01 GEN as approval #2 in **16 s**. Pet `0x057074Da…dE8` holds 0.0100 GEN, satiety 70 → 71, mood 70 → 77, and it spoke. Both transactions went through the provider — the switch is that `account` is passed as an **address string**, not an account object (§3d) |
+| **The published page hands the wallet a correct deploy** | In the live page with a mock `window.ethereum`: unknown chain → `wallet_addEthereumChain` `0x107d` with the right RPC/explorer, balance read from the network, then `eth_sendTransaction` to the consensus contract `0x0112Bf6e…271D` carrying **29 316 bytes** at 93 844 268 gas — the same transaction the Node proof signed. Only MetaMask's own confirm dialog is unproven, and nothing run from a terminal can drive it |
 | **`withdraw()` actually pays the owner** | On Bradbury, `0x970a45aE…BA8c` went from 0.05 GEN to **0 wei** at finalization and the owner's wallet gained the same amount. Finalization emitted `TransactionFinalized` and **no** `UnissuedMessagesAtFinalization` — the exact opposite of the broken route. `total_fed_wei` stays at 5e16, as it should: it records lifetime feeding, not the current till |
 
 ### Not proven
@@ -353,7 +355,7 @@ The distinction that matters: *written* ≠ *proven*.
 | Gap | Why | What would close it |
 |---|---|---|
 | A historical event feed | Events are emitted and readable for a *prospective* call, but nothing exposes the events of a transaction that already settled | A node API for a settled VM result, or events surfaced as EVM logs — §4.4 |
-| A **write** submitted from the frontend on Bradbury | Reads, live state, the leaderboard and owner-gating are all verified in the page; a write needs a funded key, which only its owner should paste in | Paste your key into the page and click one action |
+| A **write** signed by a real MetaMask popup | Everything up to the popup is proven — see §3d: in Node a stand-in wallet deployed a pet and fed it on Bradbury, and in the browser the page hands the wallet a correct 29 316-byte deploy to the consensus contract. What no terminal can drive is MetaMask's own confirm dialog | Connect MetaMask on the published page, hatch a pet, confirm |
 | The `tests/network/` value assertions | The four gas-free guards ran green against a live pet; the four that spend GEN have not had a full green run yet | `npm run test:network` |
 
 ---
@@ -661,6 +663,91 @@ The reviewer's first impression is 1 380 lines, which reads as a lot for "a smal
 ~52 KB limit and the directory is 5.5 KB. So the contract is a heavily-annotated ~700-line file, not a 1 400-line one; the volume is
 documentation, and on a chain whose whole premise is non-deterministic consensus, the arguments for
 each `eq_principle` choice are the part worth reading.
+
+---
+
+## 3d. The frontend asked the wrong thing of a player (2026-08-12)
+
+The complaint, in full: *why can't a player just connect a wallet and play? Instead there is a pile
+of fields, some "directory", and other incomprehensible things.*
+
+It was right, and none of it was forced. The first slip used to ask for four things — network, pet
+contract address, **a private key**, directory address — before anything happened. The key field is
+the worst of them: it made every player paste a secret into a web page, it made the page *generate*
+one unbidden when the field was empty and print it on the front panel, and that is exactly how a
+live private key ended up in a screenshot pasted into a chat.
+
+### What the SDK actually offers, which I had not read
+
+`ClientConfig` in genlayer-js 1.1.8:
+
+```ts
+account?: Account | Address;      // ← an ADDRESS is allowed
+provider?: EthereumProvider;      // ← EIP-1193, i.e. window.ethereum
+```
+
+and in `getCustomTransportConfig`:
+
+```js
+const isAddress = typeof config.account !== "object";
+if (PROVIDER_METHODS.has(method) && isAddress) { ... provider.request({method, params}) }
+```
+
+`PROVIDER_METHODS` is `eth_accounts`, `eth_requestAccounts`, `eth_sendTransaction`,
+`eth_signTransaction`, `personal_sign`, `eth_signTypedData_v4`. **The type of `account` is the
+switch**: pass a string and signing goes to the wallet while every read still goes to the RPC; pass
+an account object and the client signs locally. Documented, first-class, and I had used the second
+form without ever looking at the first.
+
+There is also a MetaMask *Snap* path (`client.metamaskClient()`, `isFlask`,
+`isGenLayerSnapInstalled`). It is **not** needed and would be worse: it requires MetaMask Flask plus
+a snap install. Plain MetaMask is enough, because a GenLayer transaction is an ordinary EVM
+transaction to the consensus contract.
+
+### Proven, twice
+
+**In Node, against Bradbury** — `tools/proveWalletFlow.mjs` stands a fake EIP-1193 provider in front
+of the real network: it answers `eth_requestAccounts`/`eth_chainId` and signs `eth_sendTransaction`
+before forwarding it as a raw transaction, which is what MetaMask does minus the popup.
+
+| Step | Result |
+|---|---|
+| `client.account.type` | `json-rpc` — *not* `local`, so the wallet is genuinely being asked |
+| deploy a pet (29 KB artifact) | wallet approval #1, 93 753 332 gas → **ACCEPTED in 14 s**, vote AGREE |
+| `feed()` with 0.01 GEN | wallet approval #2 → **ACCEPTED in 16 s**; pet `0x057074Da…dE8` holds 0.0100 GEN, satiety 70 → 71, mood 70 → 77, and it spoke |
+| approvals counted | 2 of 2 — nothing signed behind the wallet's back |
+
+**In the browser**, with a mock `window.ethereum` injected into the live page:
+
+| Step | Result |
+|---|---|
+| Connect wallet on the wrong chain | `eth_requestAccounts` → `eth_chainId` → `wallet_switchEthereumChain` → **4902** → `wallet_addEthereumChain` with `chainId 0x107d`, GEN, the Bradbury RPC and explorer |
+| Balance | read from the real network — 97.3626 GEN — and shown next to the address |
+| Hatch | `eth_sendTransaction` to the consensus contract `0x0112Bf6e…271D`, chainId `0x107d`, **29 316 bytes** of data, gas 93 844 268 — the same transaction the Node proof signed |
+| Dismiss the dialog (4001) | amber *"Wallet dismissed — nothing was sent, and nothing was spent"* — not an error |
+| No wallet installed | *"No wallet in this browser. Install MetaMask — or open For developers…"* |
+| Visitor with no signer at all | pet, meters, lines and board all load; `feed` answers *"feed() is a transaction, so it needs a wallet to sign it"* |
+
+### What changed in the page
+
+* **Two numbered steps** — connect a wallet, hatch a pet — and nothing else on the first slip.
+* **Hatching deploys from the browser.** The page fetches `ai_pet.py` (the *stripped* artifact,
+  29 KB against the ~52 KB ceiling) and deploys it with the player's wallet. The pet is theirs: the
+  constructor records the deployer as owner. Built by the workflow, gitignored, never committed —
+  a committed copy would silently go stale against `contracts/ai_pet.py`.
+* **Reading needs nobody.** No wallet, no key, no funds; the whole device works for a visitor.
+* **The page no longer generates a private key.** The burner field survives behind *For developers*
+  for headless testing and wallet-less browsers, and is restored from localStorage if one is already
+  there — but nothing on the playing path touches it.
+* **The shared board finds itself** from an address the page knows, instead of asking for one.
+* Network, pet address and directory address all moved into the developer drawer.
+
+### What did not change, and why
+
+The player still needs testnet GEN — every action costs gas, including the ones that send no value.
+Removing that needs a relayer or sponsored gas, which is a different project. The page's job is to
+say so before a button is pressed, which it now does with the balance on connect and a pre-flight
+check.
 
 ---
 

@@ -245,6 +245,46 @@
   .hint { font-size: 12.5px; color: var(--ink-faint); margin-top: 9px; line-height: 1.5; }
   .hint b { color: var(--ink-dim); font-weight: 400; }
 
+  /* ── the two steps that stand between a stranger and a pet ─────────────── */
+  /* Numbered because the order is real: nothing can be signed before there is
+     a wallet, and a wallet with no pet has nothing to press buttons at. */
+  .steps { list-style: none; margin: 0; padding: 0; }
+  .step { display: grid; grid-template-columns: 22px 1fr; gap: 13px; align-items: start; }
+  .step + .step { margin-top: 18px; padding-top: 18px; border-top: 1px dotted var(--rule); }
+  .num {
+    font-family: var(--mono); font-size: 10px; line-height: 20px; text-align: center;
+    color: var(--ink-faint); border: 1px solid var(--rule); border-radius: 50%;
+    width: 20px; height: 20px;
+  }
+  .step.done .num { color: #cfe9c6; border-color: #6fbf5e; }
+  .step.done .num::after { content: "✓"; }
+  .step.done .num span { display: none; }
+  .steptitle { font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
+               text-transform: uppercase; color: var(--ink-dim); margin: 3px 0 0; }
+  .stepbody .row, .stepbody .press { margin-top: 10px; }
+  .stepbody .press { width: 100%; }
+  .stepbody .row .press { width: auto; margin-top: 0; }
+  .who-am-i { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim);
+              margin-top: 8px; word-break: break-all; }
+  .who-am-i b { color: var(--shell-hi); font-weight: 400; }
+
+  /* Everything a player never needs lives behind this. It is not hidden to be
+     coy — an address field and a network picker on the front page make a toy
+     look like a config screen, and that was the honest complaint about it. */
+  details.more > summary {
+    cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--ink-faint); list-style: none;
+  }
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more > summary::before { content: "▸ "; }
+  details.more[open] > summary::before { content: "▾ "; }
+  details.more > summary:hover { color: var(--shell); }
+  details.more[open] > summary { margin-bottom: 14px; padding-bottom: 9px;
+                                 border-bottom: 1px solid var(--rule); }
+  .subhead { font-family: var(--mono); font-size: 9px; letter-spacing: .18em;
+             text-transform: uppercase; color: var(--ink-faint);
+             margin: 22px 0 10px; padding-top: 14px; border-top: 1px dotted var(--rule); }
+
   .console {
     margin-top: 14px; padding: 10px 12px; border-radius: 2px;
     border: 1px solid var(--rule); border-left: 2px solid var(--rule);
@@ -339,28 +379,41 @@
     <div class="slips">
 
       <div class="slip">
-        <h2>Connection <em>which pet, which chain</em></h2>
-        <label for="net">Network</label>
-        <select id="net">
-          <option value="testnetBradbury">Testnet Bradbury</option>
-          <option value="studionet">Studio (hosted)</option>
-          <option value="localnet">Localnet (localhost:4000)</option>
-        </select>
-        <label for="addr">Pet contract</label>
-        <input id="addr" placeholder="0x…" spellcheck="false" />
-        <label for="pk">Account key <span style="text-transform:none;letter-spacing:0">— for transactions</span></label>
-        <div class="row">
-          <input id="pk" placeholder="0x… or generate one" spellcheck="false" />
-          <button class="press slim" id="gen">New</button>
-        </div>
-        <p class="hint">Kept in this browser only. On testnet it needs GEN from the
-          <a href="https://testnet-faucet.genlayer.foundation" target="_blank" rel="noopener">faucet</a>
-          before the pet will listen to you. Reading works without any of that.</p>
-        <div class="row" style="margin-top:14px">
-          <button class="press hot" id="connect">Connect</button>
+        <h2>Start here <em>a wallet, then a pet</em></h2>
+
+        <ol class="steps">
+          <li class="step" id="stepWallet">
+            <span class="num"><span>1</span></span>
+            <div class="stepbody">
+              <p class="steptitle">Connect a wallet</p>
+              <p class="hint" id="walletMeta">Your wallet signs each action. It is never
+                asked for a key, and this page never sees one.</p>
+              <button class="press hot" id="connectWallet">Connect wallet</button>
+            </div>
+          </li>
+
+          <li class="step" id="stepPet">
+            <span class="num"><span>2</span></span>
+            <div class="stepbody">
+              <p class="steptitle">Hatch a pet</p>
+              <p class="hint" id="petMeta">Yours alone: a contract of its own, deployed by
+                you, that nobody else can take away.</p>
+              <div class="row">
+                <input id="petName" placeholder="name it" maxlength="24" spellcheck="false" />
+                <input id="petCity" placeholder="city" value="Lisbon" spellcheck="false" />
+              </div>
+              <button class="press" id="hatch" disabled>Hatch it</button>
+              <p class="hint">The city is not decoration — the pet looks up that city's real
+                weather itself, and talks about it.</p>
+            </div>
+          </li>
+        </ol>
+
+        <div id="status" class="console">Loading…</div>
+        <div class="row" style="margin-top:12px">
           <button class="press" id="refresh" disabled>Refresh</button>
+          <button class="press" id="share" disabled>Copy link</button>
         </div>
-        <div id="status" class="console">Not connected.</div>
       </div>
 
       <div class="slip">
@@ -400,20 +453,56 @@
         <ol class="board" id="board"><li class="empty">nobody has fed the pet yet</li></ol>
       </div>
 
-      <div class="slip">
-        <h2>Directory <em>every pet, one board</em></h2>
-        <div class="row">
-          <input id="factoryAddr" placeholder="0x… directory contract" spellcheck="false" />
-          <button class="press slim" id="loadDir">Load</button>
-        </div>
+      <!-- The shared board loads itself from a directory this page already knows
+           about, so a cross-contract leaderboard needs no address typed in. -->
+      <div class="slip" id="dirBox" hidden>
+        <h2>Every pet <em>one board, many contracts</em></h2>
         <p class="hint" id="dirMeta"></p>
-        <ol class="board" id="directory" style="margin-top:10px"><li class="empty">no directory loaded</li></ol>
-        <button class="press" id="joinDir" style="width:100%;margin-top:12px" disabled>Register this pet</button>
+        <ol class="board" id="directory" style="margin-top:10px"></ol>
+        <button class="press" id="joinDir" style="width:100%;margin-top:12px" disabled>Add my pet to this board</button>
       </div>
 
       <div class="slip">
         <h2>Everything it has said</h2>
         <ul class="feed" id="history"><li class="empty">nothing yet</li></ul>
+      </div>
+
+      <div class="slip">
+        <details class="more">
+          <summary>For developers</summary>
+
+          <p class="hint" style="margin-top:0">Nothing here is needed to play. It is here to
+            point the page at a different pet, a different network, or a different board.</p>
+
+          <label for="net">Network</label>
+          <select id="net">
+            <option value="testnetBradbury">Testnet Bradbury</option>
+            <option value="studionet">Studio (hosted)</option>
+            <option value="localnet">Localnet (localhost:4000)</option>
+          </select>
+
+          <label for="addr">Watch any pet</label>
+          <div class="row">
+            <input id="addr" placeholder="0x…" spellcheck="false" />
+            <button class="press slim" id="connect">Open</button>
+          </div>
+
+          <label for="factoryAddr">Directory contract</label>
+          <div class="row">
+            <input id="factoryAddr" placeholder="0x…" spellcheck="false" />
+            <button class="press slim" id="loadDir">Load</button>
+          </div>
+
+          <p class="subhead">Signing without a wallet</p>
+          <p class="hint" style="margin-top:0">For headless testing, or a browser with no
+            wallet extension. A key typed into a web page is a key you must treat as
+            burnt — use a throwaway one, funded from the faucet, and nothing else.</p>
+          <div class="row">
+            <input id="pk" placeholder="0x… burner key" spellcheck="false" />
+            <button class="press slim" id="gen">New</button>
+          </div>
+          <button class="press" id="useKey" style="width:100%;margin-top:10px">Sign with this key</button>
+        </details>
       </div>
 
     </div>
@@ -650,6 +739,13 @@ const FRAMING = new Set(["data","events","fingerprint","frames","func","module_n
   "storage_changes","genvm","stdout","stderr"]);
 
 function revertReason(err) {
+  // Closing the wallet dialog is an answer, not a fault, and it must not be
+  // dressed up as one — "Hatching failed" for a deliberate Cancel teaches the
+  // player that the page is broken when they are the one who said no.
+  if (err?.code === 4001 || err?.cause?.code === 4001
+      || /user rejected|user denied/i.test(String(err?.message ?? ""))) {
+    return "you dismissed the wallet — nothing was sent";
+  }
   const hex = err?.cause?.data ?? err?.data;
 
   // WHERE THE TRUTH ACTUALLY IS. genlayer-js hands node errors to viem, which
@@ -659,11 +755,22 @@ function revertReason(err) {
   // survives in `details` / `metaMessages` / the cause chain. Reading only
   // `message` is how "nothing works" reached a player when the node had plainly
   // said `sender does not have enough funds (0) to cover transaction fees`.
-  const deep = [err?.details, err?.metaMessages?.join(" "), err?.cause?.details,
-                err?.cause?.message, err?.cause?.cause?.message]
+  // Deduplicated: viem copies the same sentence into several of these, and a
+  // match that runs across two copies prints it twice in a row.
+  const deep = [...new Set([err?.details, err?.metaMessages?.join(" "), err?.cause?.details,
+                            err?.cause?.message, err?.cause?.cause?.message])]
     .filter(t => typeof t === "string" && t.trim()).join(" ");
   if (/does not have enough funds|insufficient funds/i.test(deep)) {
     return "this account has no GEN — use the faucet link above";
+  }
+  // The directory reads a candidate at LATEST_FINAL, so a pet hatched minutes
+  // ago genuinely cannot be read yet: from inside a contract its CODE is not
+  // there until the deploy finalizes. The node's words for that are
+  // `invalid_contract absent_runner_comment`, which explains nothing to a
+  // player who just made a pet and was told to wait for no stated reason.
+  if (/absent_runner_comment|invalid_contract/i.test(deep + " " + String(err?.message ?? ""))) {
+    return "this pet is too new for the board — its deploy has to finalize first, "
+      + "which can take a while on Bradbury. Play with it meanwhile and try later.";
   }
   const node = deep.match(/[^[\]:]*(?:does not|cannot|failed|exceeds|not allowed|rejected)[^[\]]*/i);
   const fallback = (node && node[0].trim())
@@ -696,6 +803,21 @@ const LS = {
 };
 
 let client = null, account = null, address = null;
+
+// WHO SIGNS. Three states, and the page has to be honest about which one it is
+// in, because they differ in what can be pressed:
+//
+//   null     — reading only. Every view works; nothing can be sent.
+//   "wallet" — window.ethereum. `account` stays null: genlayer-js is handed the
+//              ADDRESS as a string, which is the switch that makes it route
+//              eth_sendTransaction to the wallet instead of signing locally.
+//   "key"    — a burner key typed into the developer drawer. `account` is a real
+//              viem account object, which is the switch that turns wallet
+//              routing back OFF.
+//
+// So `signerAddress` is the one thing the rest of the page should ask about, and
+// `account` is an implementation detail of the third case only.
+let signerAddress = null, signerMode = null;
 let busy = false, isOwner = false, alive = true, evolvingNow = true;
 let reviveCost = null, timeScale = 1;
 let pet = null, social = null, character = null;   // last state read from chain
@@ -952,7 +1074,10 @@ function pressA() {                              // cycle the menu
 
 function pressB() {                              // confirm
   flash("btnB"); beep(900, 40);
-  if (!client) { $("connect").focus(); return; }
+  // No pet to press buttons at yet — point at the step that fixes it. The old
+  // line focused a contract-address field, which is exactly the answer nobody
+  // wants to the question "how do I play".
+  if (!client || !address) { $("petName").focus(); return; }
 
   if (!alive) {                                  // a dead pet offers one thing
     ui.pending = { key: "revive", label: "revive", icon: "heart" };
@@ -1034,9 +1159,17 @@ function setStatus(msg, kind = "") {
 function setBusy(b) {
   busy = b;
   const dead = !alive;
-  for (const id of ["btnA", "btnB", "btnC"]) $(id).disabled = b || !client;
-  $("refresh").disabled = b || !client;
+  // Reading needs no signer, so the device stays usable for a visitor: the menu,
+  // the stats, the character sheet and everything the pet has said all work with
+  // nothing connected. Only the sending is gated, and it is gated in doAction()
+  // with a sentence, rather than by a dead button nobody can interpret.
+  for (const id of ["btnA", "btnB", "btnC"]) $(id).disabled = b || !client || !address;
+  $("refresh").disabled = b || !client || !address;
+  $("share").disabled = b || !address;
   $("connect").disabled = b;
+  $("connectWallet").disabled = b;
+  $("hatch").disabled = b || !signerAddress;
+  $("useKey").disabled = b;
   $("withdraw").disabled = b || !client || !isOwner;
   $("freeze").disabled = b || !client || !isOwner;
   $("forget").disabled = b || !client || !isOwner;
@@ -1053,46 +1186,287 @@ function toWei(genStr) {
 const BOARD_LIMIT = 5, DIR_LIMIT = 20;
 const read = (fn, args = []) => client.readContract({ address, functionName: fn, args });
 
-$("gen").onclick = () => { $("pk").value = generatePrivateKey(); };
+const FAUCET = "https://testnet-faucet.genlayer.foundation";
 
-$("connect").onclick = async () => {
+// The persona every hatched pet starts from. Deliberately not a field: three
+// text boxes before a stranger can press anything is how a toy turns into a
+// form. The character is not fixed by it anyway — traits grow from what the pet
+// actually lives through, and the owner can watch them move on the character
+// sheet. Name and city are asked for because both are visible in play: the name
+// is what it answers to, the city is the weather it really goes and reads.
+const HATCH_PERSONA = "a curious little creature, easily delighted and quick to complain";
+
+function currentChain() {
+  const chain = chains[$("net").value];
+  if (!chain) throw new Error("Unknown network: " + $("net").value);
+  return chain;
+}
+
+/**
+ * Build the client for the current network and whoever is signing.
+ *
+ * The account argument is the whole trick. genlayer-js decides where a
+ * transaction goes by the TYPE of what it is handed: an address string means
+ * "ask the wallet", an account object means "sign it yourself". So passing the
+ * string is what keeps the key out of this page, and passing the object is what
+ * makes the burner-key path work. Reading needs neither.
+ */
+function rebuildClient() {
+  client = createClient({
+    chain: currentChain(),
+    ...(signerMode === "wallet" ? { account: signerAddress, provider: walletProvider }
+      : signerMode === "key"    ? { account }
+      : {}),
+  });
+}
+
+let walletProvider = null;
+
+/**
+ * Put the wallet on the right chain, adding it if the wallet has never seen it.
+ *
+ * genlayer-js refuses to send while the wallet sits on another chain, and it is
+ * right to: the transaction would be signed for the wrong chain id. Bradbury is
+ * a testnet no wallet ships by default, so "unknown chain" is the normal first
+ * answer, not an error — 4902 means add it and try again.
+ */
+async function ensureWalletOnChain(provider, chain) {
+  const want = `0x${chain.id.toString(16)}`;
+  if (await provider.request({ method: "eth_chainId" }) === want) return;
+  try {
+    await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
+  } catch (err) {
+    const code = err?.code ?? err?.data?.originalError?.code;
+    if (code !== 4902) throw err;
+    await provider.request({
+      method: "wallet_addEthereumChain",
+      params: [{
+        chainId: want,
+        chainName: chain.name,
+        nativeCurrency: chain.nativeCurrency,
+        rpcUrls: [...chain.rpcUrls.default.http],
+        ...(chain.blockExplorers?.default?.url
+          ? { blockExplorerUrls: [chain.blockExplorers.default.url] } : {}),
+      }],
+    });
+  }
+}
+
+/** Adopt a signer and say so, including the balance. */
+async function useSigner(mode, addr, { silent = false } = {}) {
+  signerMode = mode; signerAddress = addr;
+  rebuildClient();
+  const funds = await walletBalance();
+  const where = mode === "wallet" ? "Your wallet" : "A burner key";
+  $("walletMeta").innerHTML = `${where} is signing as <b>${escapeHtml(short(addr))}</b>`
+    + (funds === null ? "." : ` · <b>${fmtGen(funds)} GEN</b>.`)
+    + (funds === 0n
+      ? ` Empty — <a href="${FAUCET}" target="_blank" rel="noopener">take some testnet GEN</a>`
+        + " before pressing anything, every action costs gas."
+      : "");
+  if (!silent) {
+    setStatus(funds === 0n
+      ? `Connected as ${addr}.\nBalance 0 GEN — reading works, but nothing can be sent yet.\n`
+        + "Get testnet GEN from the faucet, then hatch a pet."
+      : `Connected as ${addr}.\nBalance ${fmtGen(funds)} GEN.`,
+      funds === 0n ? "warn" : "ok");
+  }
+  paintSteps();
+}
+
+let walletWatched = false;
+/** Follow the wallet if the user switches account or chain under us. */
+function watchWallet(provider) {
+  if (walletWatched || !provider?.on) return;
+  walletWatched = true;
+  provider.on("accountsChanged", async (accounts) => {
+    if (!accounts?.length) {
+      signerMode = null; signerAddress = null; rebuildClient();
+      $("walletMeta").textContent = "The wallet disconnected. Reconnect to play.";
+      setStatus("The wallet disconnected.", "warn"); paintSteps(); return;
+    }
+    await useSigner("wallet", accounts[0]);
+    if (address) await loadState();
+  });
+  // The chain moving out from under us cannot be repaired silently — say it.
+  provider.on("chainChanged", () => {
+    setStatus("The wallet switched network. Press Connect wallet to come back to "
+      + currentChain().name + ".", "warn");
+  });
+}
+
+$("connectWallet").onclick = async () => {
   try {
     setBusy(true);
-    address = $("addr").value.trim();
-    if (!address.startsWith("0x")) throw new Error("Enter the pet contract address (0x…)");
-    let pk = $("pk").value.trim();
-    if (!pk) { pk = generatePrivateKey(); $("pk").value = pk; }
-    const netKey = $("net").value;
-    const chain = chains[netKey];
-    if (!chain) throw new Error("Unknown network: " + netKey);
-
-    LS.a = address; LS.k = pk; LS.n = netKey;
-    account = createAccount(pk);
-    client = createClient({ chain, account });
-
-    // Say the balance out loud, on connect. Reading works with an empty wallet
-    // and writing does not, so an account at 0 looks identical to a working one
-    // until the first button — and then fails with the node's error wrapped in
-    // "Invalid parameters", which reads as "the game is broken" rather than
-    // "fetch some GEN". Better to show the number before anything is pressed.
-    const funds = await walletBalance();
-    setStatus("Connected to " + netKey + ".\nAccount " + (account.address || "(hidden)")
-      + (funds === null ? "" : `\nBalance ${fmtGen(funds)} GEN`
-        + (funds === 0n ? " — reading works; the buttons need GEN from the faucet." : "")),
-      funds === 0n ? "warn" : "ok");
-    $("refresh").disabled = false;
-    refreshShareLink();
-    await loadState();
-    if ($("factoryAddr").value.trim()) loadDirectory({});
-    startAutoRefresh();
+    const provider = window.ethereum;
+    if (!provider) {
+      throw new Error("No wallet in this browser. Install MetaMask — or open "
+        + "“For developers” below and sign with a burner key instead.");
+    }
+    const accounts = await provider.request({ method: "eth_requestAccounts" });
+    if (!accounts?.length) throw new Error("The wallet returned no account.");
+    await ensureWalletOnChain(provider, currentChain());
+    walletProvider = provider; account = null;
+    await useSigner("wallet", accounts[0]);
+    watchWallet(provider);
+    if (address) await loadState();
   } catch (e) {
-    client = null;
-    stopAutoRefresh();
-    setStatus("Connection error: " + (e?.message || e), "err");
+    // 4001 is the user closing the dialog. That is an answer, not a fault.
+    const denied = e?.code === 4001;
+    setStatus(denied ? "Wallet request dismissed." : "Could not connect: " + (e?.message || e),
+      denied ? "warn" : "err");
   } finally { setBusy(false); }
 };
 
+$("gen").onclick = () => { $("pk").value = generatePrivateKey(); };
+
+$("useKey").onclick = async () => {
+  const pk = $("pk").value.trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(pk)) {
+    setStatus("That is not a private key — expected 0x followed by 64 hex characters.", "err");
+    return;
+  }
+  try {
+    setBusy(true);
+    LS.k = pk;
+    walletProvider = null;
+    account = createAccount(pk);
+    await useSigner("key", account.address);
+    if (address) await loadState();
+  } catch (e) {
+    setStatus("Could not use that key: " + (e?.message || e), "err");
+  } finally { setBusy(false); }
+};
+
+// ── hatching ──────────────────────────────────────────────────────────────
+
+let artifactPromise = null;
+/**
+ * The contract to deploy, fetched from next to this page.
+ *
+ * Fetched rather than pasted into the HTML on purpose: this is the same file
+ * every Node deploy sends, produced by tools/buildContract.py, and a copy inside
+ * the page would be a second source of truth that silently goes stale. It is the
+ * BUILT artifact, not contracts/ai_pet.py — the raw source is 57 KB and Bradbury
+ * refuses a deploy over ~52 KB at gas estimation.
+ */
+function petArtifact() {
+  artifactPromise ??= fetch("ai_pet.py")
+    .then(r => {
+      if (!r.ok) throw new Error(`the contract artifact is not published next to this page (${r.status})`);
+      return r.arrayBuffer();
+    })
+    .then(b => new Uint8Array(b))
+    .catch(e => { artifactPromise = null; throw e; });
+  return artifactPromise;
+}
+
+$("hatch").onclick = async () => {
+  const name = $("petName").value.trim();
+  const city = $("petCity").value.trim() || "Lisbon";
+  if (!signerAddress) { setStatus("Connect a wallet first — hatching is a transaction.", "err"); return; }
+  if (!name) { setStatus("Give it a name first.", "err"); $("petName").focus(); return; }
+
+  const prevView = ui.view;
+  try {
+    setBusy(true);
+    ui.view = "busy"; ui.progress = "hatching";
+    const code = await petArtifact();
+
+    const funds = await walletBalance();
+    if (funds !== null && funds === 0n) {
+      ui.view = prevView === "busy" ? "home" : prevView;
+      ui.message = "no gen";
+      setStatus(`Hatching costs gas and this account has 0 GEN.\nAccount ${signerAddress}\n`
+        + "Take some from the faucet, then press Hatch again.", "err");
+      beep(180, 160);
+      return;
+    }
+
+    setStatus(`Deploying ${name}'s own contract (${code.length} bytes)…\n`
+      + "Your wallet will ask you to confirm. This is the one expensive step; "
+      + "everything after it is cheap.");
+    const hash = await client.deployContract({ code, args: [name, HATCH_PERSONA, city] });
+    const tx = await waitForSettled(client, hash, {
+      onProgress: (n, ms) => {
+        ui.progress = n.toLowerCase().slice(0, CHARS_PER_LINE);
+        setStatus(`hatching ${name}\n${n} — ${(ms / 1000).toFixed(0)}s`);
+      },
+    });
+    if (String(tx.status) !== "5" && String(tx.status) !== "7") {
+      throw new Error(`consensus ended as ${STATUS_NAME[Number(tx.status)] ?? tx.status}`);
+    }
+    const born = tx.data?.contract_address ?? tx.recipient;
+    if (!born) throw new Error("the deploy was accepted but reported no contract address");
+
+    $("petName").value = "";
+    await openPet(born);
+    setStatus(`${name} is alive.\n${born}\nIt is yours — the contract recorded you as its owner.`, "ok");
+    ui.message = "hello"; ui.view = "home";
+    beep(1180, 70);
+  } catch (e) {
+    const dismissed = e?.code === 4001 || e?.cause?.code === 4001;
+    setStatus(dismissed ? "Wallet dismissed — nothing was sent, and nothing was spent."
+                        : "Hatching failed:\n" + revertReason(e),
+              dismissed ? "warn" : "err");
+    ui.view = prevView === "busy" ? "home" : prevView;
+    if (!dismissed) beep(180, 160);
+  } finally { ui.progress = ""; setBusy(false); }
+};
+
+// ── which pet the page is looking at ──────────────────────────────────────
+
+/** Point the page at a pet and start showing it. Reading needs no signer. */
+async function openPet(addr, { announce = false } = {}) {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+    if (announce) setStatus("That is not a contract address (0x + 40 hex).", "err");
+    return;
+  }
+  address = addr; LS.a = addr; $("addr").value = addr;
+  if (!client) rebuildClient();
+  refreshShareLink();
+  setBusy(false);
+  await loadState();
+  loadDirectory({});
+  startAutoRefresh();
+  paintSteps();
+}
+
+$("connect").onclick = () => openPet($("addr").value.trim(), { announce: true });
 $("refresh").onclick = () => loadState();
+
+$("net").onchange = async () => {
+  LS.n = $("net").value;
+  // A different chain means a different everything: the signer may not be on it,
+  // and the pet address certainly does not exist there. Drop back to reading.
+  signerMode = null; signerAddress = null; account = null; walletProvider = null;
+  $("walletMeta").textContent = "Your wallet signs each action. It is never asked for a key.";
+  rebuildClient();
+  paintSteps();
+  if (address) await loadState();
+};
+
+$("share").onclick = async () => {
+  refreshShareLink();
+  try {
+    await navigator.clipboard.writeText(location.href);
+    setStatus("Link copied.\nAnyone who opens it lands on this pet and can feed it.", "ok");
+  } catch {
+    setStatus("Copy the address bar — it is a link straight to this pet.", "");
+  }
+};
+
+/** Reflect the two steps in the paper, so what is left to do is never a guess. */
+function paintSteps() {
+  $("stepWallet").classList.toggle("done", !!signerAddress);
+  $("stepPet").classList.toggle("done", !!address);
+  $("connectWallet").textContent = signerAddress ? "Use a different wallet" : "Connect wallet";
+  $("hatch").textContent = address ? "Hatch another" : "Hatch it";
+  $("hatch").disabled = busy || !signerAddress;
+  $("petMeta").textContent = address
+    ? "You are looking at " + short(address) + ". Hatching again gives you a second pet."
+    : "Yours alone: a contract of its own, deployed by you, that nobody else can take away.";
+}
 
 $("withdraw").onclick = async () => {
   const wei = toWei($("wdAmt").value);
@@ -1109,10 +1483,11 @@ $("freeze").onclick = () => doAction("set_evolution", {
 });
 $("forget").onclick = () => doAction("reset_character", { label: "reset" });
 
-/** The account's GEN, or null if it cannot be read. */
+/** The signer's GEN, or null if there is no signer or it cannot be read. */
 async function walletBalance() {
+  if (!client || !signerAddress) return null;
   try {
-    return await client.getBalance({ address: account.address });
+    return await client.getBalance({ address: signerAddress });
   } catch { return null; }
 }
 
@@ -1121,6 +1496,18 @@ const fmtGen = (wei) => (Number(wei) / 1e18).toFixed(4);
 async function doAction(fn, opts = {}) {
   if (!client) return false;
   const prevView = ui.view;
+
+  // A visitor arrives with no signer at all — the link only carried a pet. That
+  // is a fine way to arrive, so the whole device works for them; it just cannot
+  // send. Say which press is missing instead of greying the button out.
+  if (!signerAddress) {
+    ui.message = "no wallet";
+    setStatus(`${fn}() is a transaction, so it needs a wallet to sign it.\n`
+      + "Press Connect wallet above — reading this pet needed nothing, but feeding it does.", "err");
+    beep(180, 160);
+    return false;
+  }
+
   try {
     setBusy(true);
     ui.view = "busy"; ui.progress = "sending";
@@ -1136,7 +1523,7 @@ async function doAction(fn, opts = {}) {
       ui.message = "no gen";
       setStatus(
         `${fn}() needs GEN and this account has ${fmtGen(funds)}.\n`
-        + `Account ${account.address}\n`
+        + `Account ${signerAddress}\n`
         + "Send it testnet GEN from the faucet link above, then press the button again.",
         "err");
       beep(180, 160);
@@ -1165,11 +1552,13 @@ async function doAction(fn, opts = {}) {
     beep(1180, 70);
     return true;
   } catch (e) {
+    const dismissed = e?.code === 4001 || e?.cause?.code === 4001;
     const reason = revertReason(e);
-    setStatus(`${fn}() failed:\n${reason}`, "err");
-    ui.message = reason.slice(0, CHARS_PER_LINE).toLowerCase();
+    setStatus(dismissed ? "Wallet dismissed — nothing was sent." : `${fn}() failed:\n${reason}`,
+              dismissed ? "warn" : "err");
+    ui.message = dismissed ? "cancelled" : reason.slice(0, CHARS_PER_LINE).toLowerCase();
     ui.view = prevView === "busy" ? "home" : prevView;
-    beep(180, 160);
+    if (!dismissed) beep(180, 160);
     return false;
   } finally { ui.progress = ""; setBusy(false); }
 }
@@ -1230,7 +1619,7 @@ async function loadState(opts = {}) {
     timeScale = Number(s.time_scale) || 1;
     evolvingNow = char?.evolving !== false;
 
-    const me = (account?.address || "").toLowerCase();
+    const me = (signerAddress || "").toLowerCase();
     isOwner = !!me && String(owner || "").toLowerCase() === me;
 
     $("modelTag").textContent = timeScale > 1 ? `GEN-${timeScale}×` : "GEN-001";
@@ -1289,25 +1678,35 @@ function renderCharacter(c) {
     : "The owner has frozen this character — experience no longer changes it.";
 }
 
-// ── the factory directory ─────────────────────────────────────────────────
+// ── the shared board ──────────────────────────────────────────────────────
 // A separate contract, so it loads on demand and its failures never touch the
-// pet: an unreachable factory must not make a healthy pet look broken.
-// A `?dir=` from the link was already put in the field above and outranks
-// whatever this browser remembers, so only fall back to storage when the field
-// is still empty — assigning unconditionally here would undo the link.
-let factoryAddress = $("factoryAddr").value.trim() || localStorage.getItem("aipet_factory") || "";
+// pet: an unreachable directory must not make a healthy pet look broken.
+//
+// The address is known to the page. Asking a player to paste one was the single
+// worst thing on this screen — a board of other people's pets is the sort of
+// thing that should simply be there, and the field for pointing at a different
+// one moved to the developer drawer where it belongs.
+//
+// Order: a `?dir=` from the link wins (someone linked THAT board), then whatever
+// this browser last loaded, then the one deployed with this project.
+const DEFAULT_DIRECTORY = {
+  testnetBradbury: "0x9634498635CBf923a390862e249c7b880e0bB7be",
+};
+let factoryAddress = $("factoryAddr").value.trim()
+  || localStorage.getItem("aipet_factory")
+  || DEFAULT_DIRECTORY[$("net").value] || "";
 $("factoryAddr").value = factoryAddress;
 
 $("loadDir").onclick = () => loadDirectory({ announce: true });
 $("joinDir").onclick = async () => {
-  if (!factoryAddress) { setStatus("Load a factory first.", "err"); return; }
+  if (!factoryAddress) { setStatus("No directory loaded.", "err"); return; }
   const saved = address;
   try {
-    // doAction() targets the pet; registering targets the factory, so swap the
+    // doAction() targets the pet; registering targets the directory, so swap the
     // address for exactly one call and put it back whatever happens.
     address = factoryAddress;
     const ok = await doAction("register", { args: [saved], label: short(saved) });
-    if (ok) setStatus("Registered ✓ — the pet is on the shared leaderboard.", "ok");
+    if (ok) setStatus("Registered ✓ — the pet is on the shared board.", "ok");
   } finally {
     address = saved;
     await loadDirectory({});
@@ -1317,9 +1716,10 @@ $("joinDir").onclick = async () => {
 async function loadDirectory({ announce }) {
   const addr = $("factoryAddr").value.trim();
   if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
-    if (announce) setStatus("Enter the factory contract address (0x…).", "err");
+    if (announce) setStatus("Enter the directory contract address (0x…).", "err");
     return;
   }
+  if (!client) return;
   factoryAddress = addr;
   localStorage.setItem("aipet_factory", addr);
   refreshShareLink();          // a directory is worth carrying in the link too
@@ -1339,25 +1739,80 @@ async function loadDirectory({ announce }) {
           + `<span class="amt">${fromWei(r.total_fed_wei).toFixed(3)}</span></li>`).join("")
       : `<li class="empty">no pets registered yet</li>`;
     const listed = rows.some(r => r.address.toLowerCase() === me);
-    $("joinDir").disabled = !client || !address || listed;
-    $("joinDir").textContent = listed ? "Already in this directory" : "Register this pet";
+    $("dirBox").hidden = false;
+    $("joinDir").disabled = !address || !signerAddress || listed;
+    $("joinDir").textContent = listed ? "Your pet is on this board" : "Add my pet to this board";
     if (announce) setStatus(`Directory loaded — ${Number(info.pets)} pet(s).`, "ok");
   } catch (e) {
+    // Hide it rather than show a broken board: this is a side attraction, and a
+    // red box about a contract the player never asked for reads as "the game is
+    // broken" when the pet in front of them is perfectly fine.
+    $("dirBox").hidden = !announce;
     $("directory").innerHTML = `<li class="empty">could not read that directory</li>`;
     $("dirMeta").textContent = "";
     $("joinDir").disabled = true;
-    if (announce) setStatus("Could not read the factory: " + revertReason(e), "err");
+    if (announce) setStatus("Could not read the directory: " + revertReason(e), "err");
   }
 }
 
 render();
 
-// A visitor who followed a link should land ON the pet, not on a form with a
-// button. Reading needs no funds and no key of its own, so connect straight
-// away whenever we already know which pet to show — from the link, or from the
-// last one this browser looked at. Anything that spends still waits for a
-// deliberate press.
-if (/^0x[0-9a-fA-F]{40}$/.test($("addr").value.trim())) $("connect").click();
+// ── first paint ───────────────────────────────────────────────────────────
+//
+// A visitor who followed a link should land ON the pet, not on a form. Reading
+// needs no wallet, no key and no funds, so the page reads first and asks for
+// nothing until something has to be signed.
+//
+// The wallet is only re-adopted if this browser has ALREADY authorised it:
+// eth_accounts answers from what was granted before and shows no dialog, unlike
+// eth_requestAccounts. A wallet popup nobody asked for on page load is how
+// people learn to dismiss wallet popups without reading them.
+rebuildClient();
+paintSteps();
+
+(async () => {
+  const provider = window.ethereum;
+  if (provider) {
+    try {
+      const [accounts, chainId] = await Promise.all([
+        provider.request({ method: "eth_accounts" }),
+        provider.request({ method: "eth_chainId" }),
+      ]);
+      if (accounts?.length && chainId === `0x${currentChain().id.toString(16)}`) {
+        walletProvider = provider;
+        await useSigner("wallet", accounts[0], { silent: true });
+        watchWallet(provider);
+      }
+    } catch { /* no wallet, or it declines to answer — reading still works */ }
+  }
+
+  // Fall back to a burner key this browser already holds, so the developer path
+  // survives a reload. Note what is NOT here: the page no longer GENERATES a key
+  // when it finds none. Making one unbidden, and printing it on the front panel,
+  // is how a private key ended up in a screenshot in a chat.
+  if (!signerAddress && /^0x[0-9a-fA-F]{64}$/.test(LS.k)) {
+    try {
+      account = createAccount(LS.k);
+      await useSigner("key", account.address, { silent: true });
+    } catch { account = null; }
+  }
+
+  const startPet = $("addr").value.trim();
+  if (/^0x[0-9a-fA-F]{40}$/.test(startPet)) {
+    await openPet(startPet);
+    setStatus(signerAddress
+      ? `Watching ${short(startPet)} as ${short(signerAddress)}.`
+      : "Reading this pet costs nothing and needs nobody.\n"
+        + "Connect a wallet when you want to feed it.",
+      signerAddress ? "ok" : "");
+  } else {
+    rebuildClient();
+    loadDirectory({});
+    setStatus(signerAddress
+      ? "Name a pet and hatch it."
+      : "Two presses: connect a wallet, then hatch a pet.");
+  }
+})();
 </script>
 </body>
 </html>

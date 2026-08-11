@@ -20,6 +20,11 @@ on:
     branches: [main]
     paths:
       - "frontend/**"
+      # The contract ships WITH the page — the browser fetches it to hatch a pet
+      # — so a change to the contract has to republish the site, or the button
+      # would go on deploying last week's pet.
+      - "contracts/ai_pet.py"
+      - "tools/buildContract.py"
       - ".github/workflows/pages.yml"
   # …and a button, for publishing without touching the frontend.
   workflow_dispatch:
@@ -57,6 +62,21 @@ jobs:
             exit 1
           fi
           echo "no relative asset references"
+
+      - name: Build the contract the page deploys
+        # The page hatches a pet by fetching this file and deploying it, so the
+        # site is not complete without it. It is the STRIPPED artifact, not the
+        # source: Bradbury refuses a deploy over ~52 KB at gas estimation and the
+        # source is 57 KB. buildContract.py fails loudly if it ever stops fitting,
+        # which is the only reason this is a build step and not a committed copy.
+        run: |
+          python3 tools/buildContract.py contracts/ai_pet.py -o frontend/ai_pet.py
+          bytes=$(wc -c < frontend/ai_pet.py)
+          echo "artifact ${bytes} bytes"
+          if [ "$bytes" -gt 53248 ]; then
+            echo "::error::artifact is ${bytes} bytes, over the ~52 KB Bradbury deploy ceiling"
+            exit 1
+          fi
 
       - uses: actions/configure-pages@v5
         with:

@@ -23,6 +23,10 @@ const TYPES = {
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".ico": "image/x-icon",
+  // The built contract, which the page fetches to hatch a pet. Served as text
+  // so it is readable in a browser tab: anyone about to deploy it should be
+  // able to look at what they are deploying.
+  ".py": "text/plain; charset=utf-8",
 };
 
 http

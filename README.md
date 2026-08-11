@@ -40,27 +40,44 @@ Implements the build spec [`spec_1_ai_tamagotchi.md`](spec_1_ai_tamagotchi.md).
 
 ## Playing it
 
-There is a pet on Testnet Bradbury right now, and it belongs to everyone. The contract gates only
-seven methods on the owner — `visit`, `withdraw` and five settings. **`feed`, `play`, `pet`,
-`check` and `revive` are open to anybody**, and `allow_public_feed` is on, so a stranger can walk
-up and keep it alive. Whoever feeds it goes on its leaderboard.
+**[Open it](https://drawnduck.github.io/ai-tamagotchi/)**, then two presses:
 
-A link is enough to arrive — **[open the pet](https://drawnduck.github.io/ai-tamagotchi/?pet=0xda5779bB0c0dDaE864822CeF77938C6abc7b5C89&dir=0x9634498635CBf923a390862e249c7b880e0bB7be)**:
+1. **Connect wallet.** MetaMask, or anything else that injects `window.ethereum`. The page adds
+   Testnet Bradbury itself the first time — a wallet has never heard of chain 4221, and being told
+   to add a network by hand is not a step a toy gets to ask for.
+2. **Hatch a pet.** Name it, say which city it lives in, confirm in the wallet. That deploys a
+   contract of your own — the pet is not a row in someone's database, it is 29 KB of Python with
+   your address recorded as its owner.
+
+Then feed it, play with it, pet it, send it to read the weather. Get testnet GEN from the
+[faucet](https://testnet-faucet.genlayer.foundation) first; every action costs gas, including the
+ones that send no value, and the page says so with the balance rather than letting a button fail.
+
+**No private key is ever typed into this page.** genlayer-js takes an *address* plus an EIP-1193
+provider and routes only the signing calls to the wallet, so the key stays where it belongs. There
+is still a burner-key field behind *For developers*, for headless testing and browsers with no
+wallet extension — but nothing on the playing path goes near it, and the page no longer generates a
+key unbidden.
+
+### Sharing a pet
+
+Anyone can keep anyone's pet alive. The contract gates seven methods on the owner — `visit`,
+`withdraw` and five settings — while **`feed`, `play`, `pet`, `check` and `revive` are open to
+everybody**, and `allow_public_feed` is on by default. Whoever feeds it goes on its leaderboard.
+
+Press **Copy link** and send it. A visitor lands on the pet, not on a form:
 
 ```
-https://drawnduck.github.io/ai-tamagotchi/?pet=0xda5779bB0c0dDaE864822CeF77938C6abc7b5C89&dir=0x9634498635CBf923a390862e249c7b880e0bB7be
+https://drawnduck.github.io/ai-tamagotchi/?pet=0xda5779bB0c0dDaE864822CeF77938C6abc7b5C89
 ```
 
-The page reads `?pet=`, `?dir=` and `?net=` and connects on load, so the visitor lands on the pet
-instead of on a form. **The account key is never in the URL** — a link gets pasted into chats, kept
-in history and handed onward as a referrer, so it carries only which pet to look at. The visitor's
-key is generated in their browser and stays in its localStorage.
+Reading needs nothing at all — no wallet, no key, no funds. The device, the meters, the pet's lines,
+the character sheet and the shared board all work for someone who just opened the link. Only sending
+asks for a wallet, and then it asks in a sentence.
 
-Reading needs nothing at all: the device, the meters, the pet's lines, the character sheet and the
-directory all work for a visitor with an empty wallet. **To press a button they need testnet GEN**
-— every action costs gas, including the free ones — and the faucet link sits under the key field.
-That step is the floor for a testnet game; going below it needs a relayer or sponsored gas, which
-is a different project.
+**The key is never in the URL**, and that is deliberate: links get pasted into chats, kept in
+history and handed onward as a referrer. A link carries `?pet=`, and optionally `?dir=` and `?net=`
+— nothing else.
 
 Locally, without publishing anything:
 
@@ -70,9 +87,12 @@ npm run frontend           # http://127.0.0.1:5577
 
 ### Publishing it
 
-`frontend/` is the whole site — one self-contained HTML file, no build step, no bundler,
-`genlayer-js` imported from esm.sh at runtime. Two ways to put it online, both free and neither
-needing a domain:
+`frontend/` is the whole site — one self-contained HTML file, no bundler, `genlayer-js` imported
+from esm.sh at runtime. One thing is generated: `frontend/ai_pet.py`, the stripped contract the
+page fetches to hatch a pet. `npm run frontend` builds it before serving and the workflow builds it
+before publishing; it is gitignored on purpose, so a stale copy of the contract can never ship
+beside a newer `contracts/ai_pet.py`. Two ways to put it online, both free and neither needing a
+domain:
 
 * **GitHub Pages.** [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes
   `frontend/` on every push to `main`, and `enablement: true` turns Pages on by itself — there is
@@ -241,10 +261,10 @@ skips 150 hours ahead so the pet **starves to death**, shows that a dead pet ref
 and `revive`s it for 1 GEN — printing the lines, the stat changes, and the feeder leaderboard.
 
 ### Frontend
-Single page, `genlayer-js` from a CDN, no build step and no downloaded assets — see
-[Playing it](#playing-it) for the link format and how to publish it.
+Single page, `genlayer-js` from a CDN, no bundler and no downloaded assets — see
+[Playing it](#playing-it) for how a player uses it and how to publish it.
 ```bash
-npm run frontend           # http://127.0.0.1:5577
+npm run frontend           # builds frontend/ai_pet.py, then serves on 127.0.0.1:5577
 ```
 The page is the toy. Everything inside the screen — a 5×7 bitmap font, the pet, the menu icons,
 the meters — is drawn pixel by pixel onto a 96×72 canvas, because a webfont with letter-spacing is
@@ -253,10 +273,16 @@ original did: **A** walks the icon menu, **B** confirms, **C** goes back (or `�
 `esc`). Feeding, playing, petting, checking the world and visiting another pet all ask for
 confirmation on-screen before they spend anything.
 
-Everything that is not the toy is a paper slip beside it: which pet and which chain, the amount a
-feeding costs, the character sheet, the owner's till, the feeders, the shared directory, and every
-line the pet has ever said. Transaction progress and the contract's own revert sentences go to a
-console there — the screen stays a toy, the paper stays honest.
+Everything that is not the toy is a paper slip beside it: the two steps to start, the amount a
+feeding costs, the character sheet, the owner's till, the feeders, the shared board, and every line
+the pet has ever said. Transaction progress and the contract's own revert sentences go to a console
+there — the screen stays a toy, the paper stays honest.
+
+The first slip is two numbered steps and nothing else, and that is a correction rather than a
+design: it used to be four fields — network, pet address, a private key, a directory address — and
+the honest verdict on it was that a player should not have to fill in a form to meet a pet. The
+network is fixed, the pet is hatched rather than pasted, the board finds itself, and the key field
+is gone from the playing path entirely.
 
 A dead pet shows it and offers exactly one thing. The LED under the buttons is the network:
 green when the page is reading the chain, amber when it cannot, dark when the tab is in the
