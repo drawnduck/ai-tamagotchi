@@ -45,10 +45,10 @@ seven methods on the owner — `visit`, `withdraw` and five settings. **`feed`, 
 `check` and `revive` are open to anybody**, and `allow_public_feed` is on, so a stranger can walk
 up and keep it alive. Whoever feeds it goes on its leaderboard.
 
-A link is enough to arrive:
+A link is enough to arrive — **[open the pet](https://drawnduck.github.io/ai-tamagotchi/?pet=0xda5779bB0c0dDaE864822CeF77938C6abc7b5C89&dir=0x9634498635CBf923a390862e249c7b880e0bB7be)**:
 
 ```
-<where you published it>/?pet=0xda5779bB0c0dDaE864822CeF77938C6abc7b5C89&dir=0x9634498635CBf923a390862e249c7b880e0bB7be
+https://drawnduck.github.io/ai-tamagotchi/?pet=0xda5779bB0c0dDaE864822CeF77938C6abc7b5C89&dir=0x9634498635CBf923a390862e249c7b880e0bB7be
 ```
 
 The page reads `?pet=`, `?dir=` and `?net=` and connects on load, so the visitor lands on the pet
@@ -75,10 +75,10 @@ npm run frontend           # http://127.0.0.1:5577
 needing a domain:
 
 * **GitHub Pages.** [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes
-  `frontend/` on every push to `main`. Switch the repo's *Settings → Pages → Source* to **GitHub
-  Actions** once; the address is then `https://<user>.github.io/<repo>/`. The workflow refuses to
-  publish a page with a relative `<script src>`/`<link href>`, because that is the one thing that
-  works locally and 404s under the `/<repo>/` path prefix.
+  `frontend/` on every push to `main`, and `enablement: true` turns Pages on by itself — there is
+  nothing to switch in the repo settings. The address is `https://<user>.github.io/<repo>/`. The
+  workflow refuses to publish a page with a relative `<script src>`/`<link href>`, because that is
+  the one thing that works locally and 404s under the `/<repo>/` path prefix.
 * **Netlify / Cloudflare Pages drop.** Drag the `frontend/` folder onto their upload box. No git,
   no account plumbing, an address in about a minute.
 
