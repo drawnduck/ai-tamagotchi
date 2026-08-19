@@ -3,337 +3,717 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light" />
 <title>AiPet — an on-chain tamagotchi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&family=Rammetto+One&family=Space+Mono:wght@400;700&display=swap" />
 <style>
-  /* ─────────────────────────────────────────────────────────────────────────
-     The page is a desk, and the toy is sitting on it. Everything that is not
-     the toy is a paper slip beside it: monospaced, small-caps, technical.
-     Three typographic voices, none of them downloaded —
-       · the LCD:   a 5×7 bitmap font drawn pixel by pixel onto a canvas
-       · the labels: system monospace, uppercase, letterspaced
-       · the prose:  a system serif, because this is a manual, not a dashboard
-     ───────────────────────────────────────────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════════════════
+     LIQUID CHROME
+
+     There are exactly two substances on this page and nothing else:
+
+       CHROME — a banded gradient standing in for an environment reflection.
+                Dark sky, bright horizon, dark ground, repeated. That banding
+                is the only reason a flat fill ever reads as metal; a smooth
+                grey ramp reads as plastic no matter how many shadows you add.
+       SCREEN — a black or olive well, sunk into the chrome, with phosphor
+                text in it. Every value the chain gave us is shown in one.
+
+     Nothing is a card, nothing is a panel with a border. A thing is either
+     poured metal or it is a hole cut into metal. The frames wobble because
+     the metal is molten: an SVG displacement map chews the edge of each ring,
+     which is cheap, resolution-free, and applied only to decoration — never
+     to a ring that has text inside it, or the text would melt too.
+     ═══════════════════════════════════════════════════════════════════════ */
+
   :root {
-    --desk:        #14110d;
-    --desk-lift:   #1d1913;
-    --ink:         #efe7d8;
-    --ink-dim:     #9d9484;
-    --ink-faint:   #6b6558;
-    --rule:        #322c23;
+    /* the studio the toy is photographed in */
+    --studio:     #b9b8b3;
+    --studio-hi:  #e9e7e3;
+    --panel:      #dedcd8;
+    --panel-lo:   #c3c1bd;
 
-    /* the toy: milky teal plastic, coral buttons, cream bezel */
-    --shell:       #5ec8c1;
-    --shell-hi:    #a7e8e3;
-    --shell-lo:    #22736f;
-    --shell-deep:  #14504e;
-    --bezel:       #efe4cf;
-    --bezel-lo:    #bfb198;
-    --coral:       #ff5b4a;
-    --coral-lo:    #c03729;
+    --ink:        #1c1d1f;
+    --ink-dim:    #4e5054;
+    --ink-faint:  #7b7d81;
+    --hair:       rgba(28,29,31,.22);
 
-    /* the screen */
-    --lcd:         #9fb14f;
-    --lcd-lo:      #86994a;
-    --lcd-ink:     #17200c;
+    /* the glass. Its ink is not here — the canvas draws that, and one constant
+       in two places is one constant too many. See INK in the script below. */
+    --lcd:        #c6d174;
+    --lcd-lo:     #a4b352;
 
-    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    /* every well cut into the metal: inputs, readouts, the status line */
+    --well:       #0c0d09;
+    --phos:       #a3e668;
+    --phos-dim:   #62873f;
+
+    /* the buttons: oxblood rubber, the one warm thing on the object */
+    --cap:        #4d2e2d;
+    --cap-lo:     #24100f;
+    --cap-hi:     #96605c;
+
+    /* CHROME lives as SVG paint servers (#g-body, #g-core, #g-deep) so the
+       frames can stroke with it; only the flat controls are gradients here.
+       controls: shorter, flatter, and cut by a hard horizon line at the
+       midpoint — that single discontinuity is what makes a pill look pressed
+       out of steel rather than filled with grey */
+    --chrome-pill: linear-gradient(178deg,
+      #f4f5f7 0%,   #d2d5da 14%,  #a9aeb5 46%,
+      #8f959c 47%,  #b6bbc1 74%,  #e8eaed 92%,  #cfd2d6 100%);
+
+    /* Three voices. The machine speaks in one mono — tracked-out and bold when
+       it is naming a thing, plain when it is reporting a value. The prose is a
+       high-contrast serif with no italic of its own, so the aside voice is set
+       by colour and size; a synthesised slant on hairlines like these looks
+       like a mistake, and it is one. The wordmark is the toy's own lettering. */
+    --mono:  "Space Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --serif: "Gloock", "Iowan Old Style", Palatino, Georgia, serif;
+    --face:  "Rammetto One", "Trebuchet MS", system-ui, sans-serif;
   }
 
   * { box-sizing: border-box; }
-
   html, body { height: 100%; }
+
   body {
     margin: 0;
     color: var(--ink);
     font-family: var(--serif);
-    font-size: 15px;
-    line-height: 1.55;
+    font-size: 17px;
+    line-height: 1.5;
     background:
-      radial-gradient(120% 90% at 50% -20%, #2b2419 0%, transparent 60%),
-      radial-gradient(90% 70% at 50% 120%, #241d14 0%, transparent 55%),
-      var(--desk);
+      radial-gradient(72% 52% at 50% 30%, var(--studio-hi) 0%, rgba(236,234,230,0) 68%),
+      radial-gradient(120% 80% at 50% 118%, rgba(0,0,0,.28) 0%, rgba(0,0,0,0) 60%),
+      var(--studio);
+    background-attachment: fixed;
     min-height: 100vh;
   }
-  /* grain — the desk should not look like a flat swatch */
-  body::before {
+  /* film grain — a seamless studio backdrop is the tell of a render */
+  body::after {
     content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 99;
-    opacity: .16; mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.55'/></svg>");
+    opacity: .5; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/><feColorMatrix type='saturate' values='0'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='.09'/></svg>");
   }
 
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 22px 90px; }
+  .defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+  .wrap { max-width: 1220px; margin: 0 auto; padding: 46px 24px 110px; }
 
-  /* ── masthead ─────────────────────────────────────────────────────────── */
-  header { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 34px; }
+  /* ── masthead ────────────────────────────────────────────────────────── */
+  header { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; margin-bottom: 40px; }
+  /* Chrome lettering on a light ground needs a ramp weighted to the darks —
+     the same gradient that looks like steel on a black page disappears here. */
   h1 {
-    font-family: var(--mono); font-size: 13px; font-weight: 700;
-    letter-spacing: .34em; text-transform: uppercase; margin: 0; color: var(--ink);
+    /* Rammetto One ships one weight. Asking for 800 would get a synthesised
+       bold smeared over letters that are already as fat as they go. */
+    margin: 0; font-family: var(--face); font-weight: 400; font-size: 34px;
+    letter-spacing: -.01em; line-height: 1;
+    /* Chrome type is a horizon, not a diagonal sweep: dark sky at the top,
+       a white blowout where the ground meets it, dark ground below. */
+    /* the stops are pulled inward on purpose: a glyph only occupies the middle
+       ~70% of its line box, so a ramp that puts its darks at 0% and 100% shows
+       nothing but the pale middle of itself */
+    background: linear-gradient(180deg,
+      #14171a 0%,  #23282d 20%, #7b828a 34%, #f2f4f7 45%, #ffffff 50%,
+      #b3bac1 55%, #545b63 66%, #1b1f23 82%, #0f1214 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    -webkit-text-stroke: .7px rgba(18,21,24,.62);
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,.45));
   }
-  .tagline { font-size: 14px; color: var(--ink-dim); font-style: italic; margin: 0; }
-  .tagline b { color: var(--shell); font-style: normal; font-weight: 400; }
+  .tagline {
+    margin: 0; max-width: 56ch; font-size: 19px; line-height: 1.32;
+    color: var(--ink-dim);
+  }
+  .tagline b { font-style: normal; font-weight: 400; color: var(--ink);
+               border-bottom: 1px solid var(--hair); }
 
-  /* ── the stage: toy on the left, paper on the right ───────────────────── */
-  .stage { display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 46px; align-items: start; }
-  @media (max-width: 900px) { .stage { grid-template-columns: 1fr; gap: 32px; } }
+  /* ── stage ───────────────────────────────────────────────────────────── */
+  .stage { display: grid; grid-template-columns: minmax(300px, 392px) 1fr; gap: 56px; align-items: start; }
+  @media (max-width: 940px) { .stage { grid-template-columns: 1fr; gap: 44px; } }
 
-  .toybox { position: sticky; top: 28px; }
-  @media (max-width: 900px) { .toybox { position: static; } }
+  .toybox { position: sticky; top: 30px; }
+  @media (max-width: 940px) { .toybox { position: static; max-width: 392px; margin: 0 auto; } }
 
-  /* ── the device ───────────────────────────────────────────────────────── */
-  .device {
-    position: relative;
-    max-width: 372px; margin: 0 auto;
-    /* the silhouette has to stay clear of the bezel corners at every width,
-       hence the generous flanks — an egg that clips its own screen reads as a
-       mistake rather than as a shape */
-    padding: 52px 40px 30px;
-    border-radius: 46% 46% 42% 42% / 32% 32% 50% 50%;
+  /* ═══ THE OBJECT ═══════════════════════════════════════════════════════ */
+  .device { position: relative; padding-top: 26px; }
+
+  /* the strap that went round a schoolbag, and the aerial nobody could explain */
+  .strap {
+    position: absolute; z-index: 0; top: 4px; left: 30%; width: 44%; height: 44px;
+    border-radius: 50% 50% 44% 44% / 82% 82% 26% 26%;
+    background: linear-gradient(178deg, #6b3b39 0%, #442223 40%, #2a1213 100%);
+    box-shadow: inset 0 2px 0 rgba(255,255,255,.22), 0 3px 7px rgba(0,0,0,.4);
+  }
+  .antenna {
+    position: absolute; z-index: 0; top: 0; left: 24%; width: 20px; height: 76px;
+    transform: rotate(-19deg); transform-origin: 50% 100%;
+    border-radius: 10px 10px 4px 4px;
+    background: linear-gradient(94deg, #4a4f55 0%, #eef0f2 30%, #9aa0a7 52%, #3a3e44 78%, #b9bec4 100%);
+    box-shadow: 0 2px 6px rgba(0,0,0,.4);
+  }
+  .antenna::before {
+    content: ""; position: absolute; top: -9px; left: 50%; width: 21px; height: 21px;
+    transform: translateX(-50%); border-radius: 50%;
+    background: radial-gradient(62% 58% at 34% 28%, #fff 0%, #c3c8ce 34%, #6e747b 68%, #2f3339 100%);
+    box-shadow: 0 2px 4px rgba(0,0,0,.45);
+  }
+
+  /* the egg. Smooth chrome — only the bezel is allowed to be molten, or the
+     silhouette stops reading as an object you could hold. */
+  .egg {
+    position: relative; z-index: 1;
+    padding: 54px 40px 34px;
+    border-radius: 49% 49% 45% 45% / 39% 39% 55% 55%;
     background:
-      radial-gradient(120% 80% at 30% 8%, var(--shell-hi) 0%, var(--shell) 38%, var(--shell-lo) 84%, var(--shell-deep) 100%);
+      radial-gradient(44% 26% at 29% 8%,  rgba(255,255,255,.95) 0%, rgba(255,255,255,0) 100%),
+      radial-gradient(34% 18% at 78% 93%, rgba(255,255,255,.5) 0%, rgba(255,255,255,0) 100%),
+      linear-gradient(168deg,
+        #9aa0a7 0%,  #e8ebee 8%,  #ffffff 14%, #a2a8af 26%,
+        #4e545b 36%, #c6cbd1 47%, #f7f8fa 54%, #a9afb6 64%,
+        #383d43 76%, #7d848b 86%, #cdd1d5 96%, #6a7178 100%);
     box-shadow:
-      inset 0 3px 0 rgba(255,255,255,.55),
-      inset 0 -14px 26px rgba(0,0,0,.34),
-      inset 0 0 0 1px rgba(0,0,0,.18),
-      0 30px 46px -22px rgba(0,0,0,.85),
-      0 4px 10px rgba(0,0,0,.4);
-    transform: rotate(-1.4deg);
-    transition: transform .5s cubic-bezier(.2,.9,.3,1);
+      inset 0 3px 0 rgba(255,255,255,.9),
+      inset 0 -26px 44px rgba(0,0,0,.42),
+      inset 0 0 0 1px rgba(255,255,255,.5),
+      0 34px 44px -26px rgba(0,0,0,.72),
+      0 10px 18px -8px rgba(0,0,0,.38);
   }
-  .device:hover { transform: rotate(-.4deg) translateY(-2px); }
-  /* specular sheen across the plastic */
-  .device::after {
-    content: ""; position: absolute; left: 12%; right: 34%; top: 4%; height: 24%;
-    border-radius: 50%; pointer-events: none;
-    background: linear-gradient(160deg, rgba(255,255,255,.62), rgba(255,255,255,0) 70%);
-    filter: blur(3px);
+  /* A glint passing over the shell, because still chrome is dead chrome.
+     Three things make it read as light rather than as a moving rectangle:
+
+       · it is CLIPPED to the shell, and it starts and ends fully outside it,
+         so the moment the loop restarts there is nothing on screen to jump —
+         the seam is hidden by the object rather than eased over;
+       · it rests for most of the cycle. A highlight that never stops is a
+         screensaver; one that passes every few seconds is a reflection;
+       · it passes UNDER the glass and the rubber. A reflection on a steel
+         shell has no business brightening an LCD or a matte button, which is
+         what a pseudo-element painted last will happily do. */
+  .sheen {
+    position: absolute; inset: 0; z-index: 1;
+    border-radius: inherit; overflow: hidden; pointer-events: none;
   }
-  /* the loop the keychain went through */
-  .device::before {
-    content: ""; position: absolute; top: -13px; left: 50%; width: 34px; height: 22px;
-    transform: translateX(-50%);
-    border: 5px solid var(--shell-lo); border-bottom: none;
-    border-radius: 18px 18px 0 0;
-    box-shadow: inset 0 2px 0 rgba(255,255,255,.3);
+  .sheen::before {
+    content: ""; position: absolute; top: -30%; bottom: -30%; left: 0; width: 45%;
+    background: linear-gradient(90deg,
+      rgba(255,255,255,0) 0%,   rgba(255,255,255,.06) 22%,
+      rgba(255,255,255,.3) 44%, rgba(255,255,255,.42) 50%,
+      rgba(255,255,255,.3) 56%, rgba(255,255,255,.06) 78%,
+      rgba(255,255,255,0) 100%);
+    filter: blur(6px);
+    animation: glint 9s cubic-bezier(.42,0,.3,1) infinite;
+  }
+  /* the pass takes the first 42% of the cycle; the rest is the wait */
+  @keyframes glint {
+    0%        { transform: translateX(-200%) rotate(16deg); }
+    42%, 100% { transform: translateX(320%)  rotate(16deg); }
+  }
+  /* the shell's own furniture sits above the light */
+  .bezel, .buttons, .underside { position: relative; z-index: 2; }
+
+  .wordmark {
+    position: relative; text-align: center; margin: 0 0 20px;
+    font-family: var(--face); font-weight: 400; font-size: 30px; line-height: 1;
+    letter-spacing: -.01em;
+    color: #9aa0a7;
+    text-shadow:
+      0 2px 0 rgba(255,255,255,1),
+      0 -1px 1px rgba(0,0,0,.55),
+      0 3px 5px rgba(0,0,0,.3);
   }
 
-  .brandline {
-    display: flex; justify-content: space-between; align-items: center;
-    font-family: var(--mono); font-size: 8px; letter-spacing: .22em; text-transform: uppercase;
-    color: rgba(6,40,38,.6); margin: 0 4px 12px; text-shadow: 0 1px 0 rgba(255,255,255,.35);
+  /* ── the molten bezel ────────────────────────────────────────────────── */
+  .bezel { position: relative; padding: 33px; }
+
+  /* Every chrome frame is ONE generated curve, stroked three times — see the
+     frame script below. All this side has to do is give it a box to fill and
+     stay out of the way of the shadow. */
+  svg.metal {
+    position: absolute; inset: 0; overflow: visible; pointer-events: none;
+    filter: drop-shadow(0 5px 7px rgba(0,0,0,.3));
   }
 
-  /* the bezel around the glass */
-  .bezel {
-    padding: 11px;
-    border-radius: 22px;
-    background: linear-gradient(180deg, var(--bezel), var(--bezel-lo));
-    box-shadow:
-      inset 0 2px 0 rgba(255,255,255,.85),
-      inset 0 -3px 6px rgba(0,0,0,.22),
-      0 2px 5px rgba(0,0,0,.35);
-  }
   .glass {
-    position: relative;
-    border-radius: 9px;
-    background: linear-gradient(175deg, var(--lcd), var(--lcd-lo));
-    box-shadow: inset 0 0 0 2px rgba(0,0,0,.55), inset 0 3px 14px rgba(0,0,0,.35);
+    position: relative; z-index: 1;
+    border-radius: 8px;
+    background: linear-gradient(174deg, var(--lcd) 0%, var(--lcd-lo) 100%);
+    box-shadow:
+      inset 0 0 0 2px rgba(0,0,0,.6),
+      inset 0 4px 16px rgba(0,0,0,.32),
+      0 0 22px rgba(198,209,116,.34);
     overflow: hidden;
   }
-  #lcd {
-    display: block; width: 100%; height: auto;
-    image-rendering: pixelated; image-rendering: crisp-edges;
-  }
-  /* the dot matrix, and a glare across the plastic window */
+  #lcd { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+  /* dot matrix + a glare across the window in front of it */
   .glass::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background:
-      linear-gradient(115deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,0) 38%),
-      repeating-linear-gradient(0deg, rgba(0,0,0,.14) 0 1px, transparent 1px 3px),
-      repeating-linear-gradient(90deg, rgba(0,0,0,.10) 0 1px, transparent 1px 3px);
+      linear-gradient(118deg, rgba(255,255,255,.3) 0%, rgba(255,255,255,0) 34%),
+      repeating-linear-gradient(0deg,  rgba(0,0,0,.13) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(0,0,0,.09) 0 1px, transparent 1px 3px);
   }
 
-  /* the three buttons, in the classic arc */
-  .buttons { display: flex; justify-content: center; gap: 22px; margin-top: 22px; }
+  /* ── the three caps ──────────────────────────────────────────────────── */
+  .buttons { display: flex; justify-content: center; gap: 30px; margin: 28px 0 54px; }
   .btn {
-    width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
-    background: radial-gradient(70% 70% at 35% 28%, #ff8b7d 0%, var(--coral) 46%, var(--coral-lo) 100%);
-    box-shadow:
-      inset 0 2px 0 rgba(255,255,255,.6),
-      inset 0 -4px 8px rgba(0,0,0,.3),
-      0 5px 0 var(--coral-lo),
-      0 8px 14px rgba(0,0,0,.45);
-    color: #fff2ef; font-family: var(--mono); font-size: 11px; font-weight: 700;
-    letter-spacing: .08em;
-    transition: transform .06s ease, box-shadow .06s ease;
+    position: relative; width: 58px; height: 58px; padding: 0;
+    border: 0; background: none; cursor: pointer;
     -webkit-tap-highlight-color: transparent;
   }
-  .btn:active:not(:disabled), .btn.pressed {
+  .dome {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: radial-gradient(64% 60% at 34% 26%, var(--cap-hi) 0%, var(--cap) 44%, var(--cap-lo) 100%);
+    box-shadow:
+      inset 0 2px 3px rgba(255,255,255,.3),
+      inset 0 -7px 12px rgba(0,0,0,.6),
+      0 0 0 2px rgba(255,255,255,.32),
+      0 5px 0 #1a0d0c,
+      0 10px 15px rgba(0,0,0,.42);
+    transition: transform .07s ease, box-shadow .07s ease;
+  }
+  .btn small {
+    position: absolute; top: calc(100% + 11px); left: 50%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 9px; font-weight: 400; letter-spacing: .2em;
+    text-transform: uppercase; color: rgba(30,33,37,.62);
+    text-shadow: 0 1px 0 rgba(255,255,255,.8);
+    white-space: nowrap;
+  }
+  .btn small b {
+    display: block; margin-bottom: 3px; font-size: 12px; font-weight: 700;
+    letter-spacing: 0; color: rgba(24,27,31,.78);
+  }
+  /* B is the one that commits, so it gets the boxed letter a manual would give it */
+  #btnB small b { width: fit-content; margin: 0 auto 3px; padding: 0 3px;
+                  border: 1px solid currentColor; border-radius: 2px; }
+  .btn:active:not(:disabled) .dome, .btn.pressed .dome {
     transform: translateY(4px);
-    box-shadow: inset 0 2px 6px rgba(0,0,0,.45), 0 1px 0 var(--coral-lo), 0 2px 5px rgba(0,0,0,.4);
+    box-shadow:
+      inset 0 3px 7px rgba(0,0,0,.65),
+      0 0 0 2px rgba(255,255,255,.24),
+      0 1px 0 #1a0d0c, 0 3px 7px rgba(0,0,0,.4);
   }
-  .btn:disabled { filter: grayscale(.55) brightness(.75); cursor: default; }
-  .btn small { display: block; font-size: 7px; letter-spacing: .18em; opacity: .8; font-weight: 400; }
+  .btn:disabled { cursor: default; }
+  .btn:disabled .dome { filter: grayscale(.45) brightness(.72); }
 
-  /* speaker grille + power LED, purely decorative but the object needs them */
-  .underside { display: flex; align-items: center; justify-content: space-between; margin: 16px 14px 0; }
-  .grille { display: grid; grid-template-columns: repeat(6, 4px); gap: 4px; }
-  .grille i { width: 4px; height: 4px; border-radius: 50%; background: rgba(4,44,42,.42);
-              box-shadow: inset 0 1px 0 rgba(255,255,255,.25); }
+  /* The shell is an egg, so its bottom is far narrower than the content box it
+     is padding. Anything laid out edge to edge down here hangs off the side of
+     the object — hence a fixed, centred track well inside the silhouette. */
+  .underside {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 58%; margin: 0 auto;
+  }
+  .grille { display: grid; grid-template-columns: repeat(6, 5px); gap: 5px; }
+  .grille i {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: rgba(20,23,26,.5);
+    box-shadow: inset 0 -1px 1px rgba(0,0,0,.6), 0 1px 0 rgba(255,255,255,.65);
+  }
+  .etch {
+    font-family: var(--mono); font-size: 9px; font-weight: 400; letter-spacing: .22em;
+    color: rgba(30,33,37,.5); text-shadow: 0 1px 0 rgba(255,255,255,.8);
+  }
   .led {
-    width: 9px; height: 9px; border-radius: 50%; background: #4b6f2c;
-    box-shadow: inset 0 0 2px rgba(0,0,0,.6);
+    width: 11px; height: 11px; border-radius: 50%;
+    background: radial-gradient(circle at 34% 30%, #6e7a5c, #2c3327);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,.7), 0 1px 0 rgba(255,255,255,.6);
+    transition: background .3s ease, box-shadow .3s ease;
   }
-  .led.on { background: #8dff5e; box-shadow: 0 0 8px #8dff5eaa, inset 0 0 2px rgba(0,0,0,.4); }
-  .led.warn { background: #ffc24d; box-shadow: 0 0 8px #ffc24d99, inset 0 0 2px rgba(0,0,0,.4); }
+  .led.on {
+    background: radial-gradient(circle at 34% 30%, #e6ffd6, #46ff2e 46%, #1f8a12);
+    box-shadow: 0 0 12px rgba(70,255,46,.85), inset 0 1px 2px rgba(0,0,0,.3);
+    animation: breathe 2.6s ease-in-out infinite;
+  }
+  .led.warn {
+    background: radial-gradient(circle at 34% 30%, #fff2d0, #ffbe30 46%, #a06a00);
+    box-shadow: 0 0 12px rgba(255,190,48,.8), inset 0 1px 2px rgba(0,0,0,.3);
+  }
+  @keyframes breathe { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.35); } }
 
+  /* ── under the toy ───────────────────────────────────────────────────── */
   .devicefoot {
-    margin-top: 16px; text-align: center;
-    font-family: var(--mono); font-size: 9px; letter-spacing: .2em; text-transform: uppercase;
-    color: var(--ink-faint);
+    display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+    gap: 7px 15px; margin: 24px 0 0;
+    font-family: var(--mono); font-size: 9px; font-weight: 400; letter-spacing: .2em;
+    text-transform: uppercase; color: var(--ink-faint);
   }
-  .devicefoot kbd {
-    font-family: var(--mono); font-size: 9px; color: var(--ink-dim);
-    border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px;
+  .devicefoot span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  kbd {
+    display: inline-block; margin: 0 1px; padding: 3px 7px;
+    font-family: var(--mono); font-size: 9px; font-weight: 400; color: #1e2125;
+    border-radius: 5px;
+    background: var(--chrome-pill);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.3),
+      0 1px 2px rgba(0,0,0,.28);
+    text-shadow: 0 1px 0 rgba(255,255,255,.5);
+  }
+  .saidout {
+    margin: 16px 0 0; text-align: center; font-family: var(--serif);
+    font-size: 16px; line-height: 1.4; color: var(--ink-dim);
   }
 
-  /* ── paper slips ──────────────────────────────────────────────────────── */
-  .slips { display: flex; flex-direction: column; gap: 20px; }
-  .slip {
-    border: 1px solid var(--rule);
-    border-radius: 3px;
-    background: linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,.008));
-    padding: 18px 20px 20px;
-  }
-  .slip > h2 {
-    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .26em;
-    text-transform: uppercase; color: var(--ink-dim);
-    margin: 0 0 14px; padding-bottom: 9px; border-bottom: 1px solid var(--rule);
-    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
-  }
-  .slip > h2 em { font-style: normal; font-family: var(--serif); font-size: 12px;
-                  letter-spacing: 0; text-transform: none; color: var(--ink-faint); }
+  /* ═══ THE PAPERWORK ════════════════════════════════════════════════════ */
+  .slips { display: flex; flex-direction: column; gap: 30px; }
 
-  label {
-    display: block; font-family: var(--mono); font-size: 9px; letter-spacing: .18em;
-    text-transform: uppercase; color: var(--ink-faint); margin: 12px 0 5px;
+  .slip { position: relative; }
+  /* The frame's own curve is the panel's edge, so the content has to clear the
+     tube AND the full swing of the wave — see FRAME in the script. */
+  .slip__body { position: relative; z-index: 1; padding: 34px 36px 36px; }
+
+  /* panels arrive one after another, like a machine powering up */
+  @media (prefers-reduced-motion: no-preference) {
+    .slip { animation: rise .8s cubic-bezier(.18,.85,.28,1) both; }
+    .slip:nth-child(1) { animation-delay: .05s } .slip:nth-child(2) { animation-delay: .13s }
+    .slip:nth-child(3) { animation-delay: .21s } .slip:nth-child(4) { animation-delay: .29s }
+    .slip:nth-child(5) { animation-delay: .37s } .slip:nth-child(6) { animation-delay: .45s }
+    .slip:nth-child(n+7) { animation-delay: .53s }
+    .toybox { animation: rise .9s cubic-bezier(.18,.85,.28,1) both; }
   }
-  label:first-of-type { margin-top: 0; }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: none; } }
+
+  .slip > .slip__body > h2 {
+    display: flex; align-items: center; gap: 10px;
+    margin: 0 0 4px;
+    font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: .24em;
+    text-transform: uppercase; color: #232629;
+    text-shadow: 0 1px 0 rgba(255,255,255,.75);
+  }
+  /* <em> is italic by UA default, and Gloock has no italic to give — left
+     alone the browser shears the roman and calls it one. */
+  h2 em {
+    margin-left: auto; font-family: var(--serif); font-size: 15px; font-style: normal;
+    font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-faint);
+  }
+  .sigil { width: 13px; height: 13px; flex: none; color: #33373b; filter: drop-shadow(0 1px 0 rgba(255,255,255,.7)); }
+  .hr { height: 8px; margin: 0 0 16px; opacity: .55;
+        background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='26' height='8' viewBox='0 0 26 8'><path d='M0 4 q3.25 -3.4 6.5 0 t6.5 0 t6.5 0 t6.5 0' fill='none' stroke='%231c1d1f' stroke-width='1.1'/></svg>") repeat-x center; }
+
+  /* ── the two steps between a stranger and a pet ──────────────────────── */
+  .steps { list-style: none; margin: 0; padding: 0; }
+  .step { display: grid; grid-template-columns: 24px 1fr; gap: 14px; align-items: start; }
+  .step + .step { margin-top: 18px; padding-top: 18px;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='26' height='8' viewBox='0 0 26 8'><path d='M0 4 q3.25 -3.4 6.5 0 t6.5 0 t6.5 0 t6.5 0' fill='none' stroke='%231c1d1f' stroke-opacity='.4' stroke-width='1.1'/></svg>") repeat-x top; }
+  .num {
+    width: 22px; height: 22px; border-radius: 7px; margin-top: 1px;
+    font-family: var(--mono); font-size: 10.5px; font-weight: 700; line-height: 22px;
+    text-align: center; color: #1e2125;
+    background: var(--chrome-pill);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.3), 0 1px 2px rgba(0,0,0,.3);
+  }
+  .step.done .num { color: #16460f; background: linear-gradient(178deg, #dff5cd, #8ac96e 48%, #4f9a37); }
+  .step.done .num::after { content: "✓"; }
+  .step.done .num span { display: none; }
+  .steptitle {
+    margin: 3px 0 0; font-family: var(--mono); font-size: 11px; font-weight: 700;
+    letter-spacing: .2em; text-transform: uppercase; color: #26292c;
+    text-shadow: 0 1px 0 rgba(255,255,255,.7);
+  }
+  .stepbody > * + * { margin-top: 11px; }
+
+  /* A display serif set at reading size shouts. Gloock earns its keep one or
+     two steps smaller than a text face would want. */
+  .hint { margin: 9px 0 0; font-size: 14.5px; line-height: 1.45; color: var(--ink-dim); }
+  .hint b { font-weight: 400; color: var(--ink); }
+  .who-am-i { font-family: var(--mono); font-size: 13px; color: var(--ink-dim); word-break: break-all; }
+  .who-am-i b { font-weight: 700; color: #2d5a16; }
+
+  /* ── a hole cut in the metal, with a label stamped beside it ─────────── */
+  .field {
+    display: flex; align-items: stretch; padding: 4px; border-radius: 999px;
+    background: var(--chrome-pill);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(0,0,0,.34),
+      0 2px 4px rgba(0,0,0,.26), 0 1px 0 rgba(255,255,255,.5);
+  }
+  .field > label {
+    display: flex; align-items: center; padding: 0 13px 0 12px;
+    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .18em;
+    text-transform: uppercase; color: #22252a; text-shadow: 0 1px 0 rgba(255,255,255,.65);
+    white-space: nowrap;
+  }
+  .field > label i { font-style: normal; letter-spacing: 0; text-transform: none;
+                     font-family: var(--serif); font-size: 13px; color: #4a4d51; margin-left: 6px; }
   input, select {
-    width: 100%; padding: 9px 11px;
-    background: rgba(0,0,0,.32); color: var(--ink);
-    border: 1px solid var(--rule); border-radius: 2px;
-    font-family: var(--mono); font-size: 12px; outline: none;
+    flex: 1; min-width: 0; width: 100%;
+    padding: 10px 15px; border: 0; border-radius: 999px;
+    background: var(--well); color: var(--phos);
+    font-family: var(--mono); font-size: 14px; line-height: 1.2;
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.95), inset 0 0 0 1px rgba(255,255,255,.07);
+    outline: none;
   }
-  input:focus, select:focus { border-color: var(--shell); box-shadow: 0 0 0 2px rgba(94,200,193,.14); }
-  .row { display: flex; gap: 8px; }
+  input::placeholder { color: var(--phos-dim); }
+  input:focus, select:focus {
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.95), inset 0 0 0 1px rgba(163,230,104,.5),
+                0 0 0 3px rgba(163,230,104,.16);
+  }
+  select { appearance: none; -webkit-appearance: none; cursor: pointer; }
+  .row { display: flex; gap: 9px; align-items: stretch; }
   .row > * { flex: 1; }
   .row > .slim { flex: 0 0 auto; }
 
+  /* ── controls: pressed metal ─────────────────────────────────────────── */
   .press {
-    cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
-    text-transform: uppercase; font-weight: 700;
-    color: var(--ink); background: rgba(255,255,255,.05);
-    border: 1px solid var(--rule); border-radius: 2px; padding: 9px 13px;
-    transition: background .15s ease, border-color .15s ease, color .15s ease;
+    display: block; width: 100%; cursor: pointer; border: 0;
+    padding: 13px 22px; border-radius: 999px;
+    font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: .22em;
+    text-transform: uppercase; color: #1a1d21;
+    text-shadow: 0 1px 0 rgba(255,255,255,.6);
+    background: var(--chrome-pill); background-size: 100% 260%; background-position: 50% 40%;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.95), inset 0 -2px 3px rgba(0,0,0,.3),
+      0 3px 6px rgba(0,0,0,.28), 0 1px 0 rgba(255,255,255,.5);
+    transition: background-position .45s cubic-bezier(.2,.8,.3,1), transform .08s ease, box-shadow .12s ease;
   }
-  .press:hover:not(:disabled) { border-color: var(--shell); color: var(--shell-hi); }
-  .press:disabled { opacity: .38; cursor: default; }
-  .press.hot { border-color: rgba(255,91,74,.5); color: #ffb9b0; }
-  .press.hot:hover:not(:disabled) { border-color: var(--coral); color: #fff; background: rgba(255,91,74,.12); }
-
-  .hint { font-size: 12.5px; color: var(--ink-faint); margin-top: 9px; line-height: 1.5; }
-  .hint b { color: var(--ink-dim); font-weight: 400; }
-
-  /* ── the two steps that stand between a stranger and a pet ─────────────── */
-  /* Numbered because the order is real: nothing can be signed before there is
-     a wallet, and a wallet with no pet has nothing to press buttons at. */
-  .steps { list-style: none; margin: 0; padding: 0; }
-  .step { display: grid; grid-template-columns: 22px 1fr; gap: 13px; align-items: start; }
-  .step + .step { margin-top: 18px; padding-top: 18px; border-top: 1px dotted var(--rule); }
-  .num {
-    font-family: var(--mono); font-size: 10px; line-height: 20px; text-align: center;
-    color: var(--ink-faint); border: 1px solid var(--rule); border-radius: 50%;
-    width: 20px; height: 20px;
+  .press:hover:not(:disabled) { background-position: 50% 78%; }
+  .press:active:not(:disabled) {
+    transform: translateY(2px);
+    box-shadow: inset 0 3px 7px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.3);
   }
-  .step.done .num { color: #cfe9c6; border-color: #6fbf5e; }
-  .step.done .num::after { content: "✓"; }
-  .step.done .num span { display: none; }
-  .steptitle { font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
-               text-transform: uppercase; color: var(--ink-dim); margin: 3px 0 0; }
-  .stepbody .row, .stepbody .press { margin-top: 10px; }
-  .stepbody .press { width: 100%; }
-  .stepbody .row .press { width: auto; margin-top: 0; }
-  .who-am-i { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim);
-              margin-top: 8px; word-break: break-all; }
-  .who-am-i b { color: var(--shell-hi); font-weight: 400; }
-
-  /* Everything a player never needs lives behind this. It is not hidden to be
-     coy — an address field and a network picker on the front page make a toy
-     look like a config screen, and that was the honest complaint about it. */
-  details.more > summary {
-    cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: .2em;
-    text-transform: uppercase; color: var(--ink-faint); list-style: none;
+  .press:disabled { cursor: default; filter: grayscale(.75) brightness(.94) opacity(.5); }
+  /* The one warm control on the page, so the first thing to press is the first
+     thing the eye lands on. Same pressed-metal recipe, copper instead of steel. */
+  .press.hot {
+    color: #2e1006; text-shadow: 0 1px 0 rgba(255,226,200,.5);
+    background: linear-gradient(178deg,
+      #ffe3c6 0%, #dfa475 15%, #b47645 46%, #8d5327 47%, #c08355 76%, #f0cba6 94%, #c28f60 100%);
+    background-size: 100% 260%; background-position: 50% 40%;
   }
-  details.more > summary::-webkit-details-marker { display: none; }
-  details.more > summary::before { content: "▸ "; }
-  details.more[open] > summary::before { content: "▾ "; }
-  details.more > summary:hover { color: var(--shell); }
-  details.more[open] > summary { margin-bottom: 14px; padding-bottom: 9px;
-                                 border-bottom: 1px solid var(--rule); }
-  .subhead { font-family: var(--mono); font-size: 9px; letter-spacing: .18em;
-             text-transform: uppercase; color: var(--ink-faint);
-             margin: 22px 0 10px; padding-top: 14px; border-top: 1px dotted var(--rule); }
+  .press.slim { width: auto; padding: 13px 20px; }
 
+  /* ── the status line: the only thing on the page that talks back ─────── */
   .console {
-    margin-top: 14px; padding: 10px 12px; border-radius: 2px;
-    border: 1px solid var(--rule); border-left: 2px solid var(--rule);
-    background: rgba(0,0,0,.3);
-    font-family: var(--mono); font-size: 11.5px; line-height: 1.5; color: var(--ink-dim);
-    white-space: pre-wrap; word-break: break-word; max-height: 190px; overflow: auto;
+    margin-top: 16px; padding: 12px 16px; border-radius: 12px;
+    background: var(--well); color: var(--phos);
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.5;
+    box-shadow: inset 0 2px 7px rgba(0,0,0,.95), inset 0 0 0 1px rgba(255,255,255,.06),
+                0 1px 0 rgba(255,255,255,.55);
+    white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto;
   }
-  .console.ok  { border-left-color: #6fbf5e; color: #cfe9c6; }
-  .console.err { border-left-color: var(--coral); color: #ffc9c2; }
-  /* connected, but the wallet is empty — not an error, not nothing to say */
-  .console.warn { border-left-color: #ffc24d; color: #f2ddb4; }
+  .console.ok   { color: #b6f57c; }
+  .console.err  { color: #ff8f74; }
+  .console.warn { color: #ffc861; }
 
-  /* data lists */
-  .board { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  /* ── readouts ────────────────────────────────────────────────────────── */
+  .board { list-style: none; margin: 0; padding: 0; }
   .board li {
-    display: grid; grid-template-columns: 18px 1fr auto; gap: 12px; align-items: baseline;
-    padding: 7px 0; border-bottom: 1px dotted var(--rule);
-    font-family: var(--mono); font-size: 11.5px;
+    display: grid; grid-template-columns: 20px 1fr auto; gap: 12px; align-items: baseline;
+    padding: 8px 0; font-family: var(--mono); font-size: 13.5px; color: var(--ink-dim);
+    border-bottom: 1px dotted var(--hair);
   }
   .board li:last-child { border-bottom: none; }
   .rank { color: var(--ink-faint); }
-  .who { color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; }
-  .who.me { color: var(--shell-hi); }
+  .who { overflow: hidden; text-overflow: ellipsis; }
+  .who.me { color: #2d5a16; font-weight: 700; }
   .amt { color: var(--ink); }
-  .empty { color: var(--ink-faint); font-family: var(--serif); font-style: italic; font-size: 13px; }
+  .empty { font-family: var(--serif); font-size: 15px; color: var(--ink-faint); }
+  .board li.empty { display: block; }
 
-  .feed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 11px;
-          max-height: 300px; overflow: auto; }
-  .feed li { font-size: 13.5px; color: var(--ink-dim); padding-left: 15px; position: relative; line-height: 1.5; }
-  .feed li::before { content: "·"; position: absolute; left: 0; color: var(--shell); }
+  .feed { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto; }
+  .feed li { position: relative; padding: 0 0 0 18px; margin-bottom: 12px;
+             font-size: 15px; line-height: 1.45; color: var(--ink-dim); }
+  .feed li::before { content: ""; position: absolute; left: 2px; top: 9px;
+                     width: 6px; height: 6px; border-radius: 50%;
+                     background: radial-gradient(circle at 34% 30%, #fff, #8f959c 60%, #3a3e44);
+                     box-shadow: 0 1px 0 rgba(255,255,255,.7); }
   .feed li:first-child { color: var(--ink); }
 
-  .traits { display: flex; flex-wrap: wrap; gap: 7px; }
-  .traits span {
-    font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
-    padding: 4px 9px; border: 1px solid var(--rule); border-radius: 2px; color: var(--ink-faint);
+  /* ── the character sheet ─────────────────────────────────────────────────
+     Six counters the pet grew into. The two highest are the ones the contract
+     writes into its prompt, so they are the only ones dressed in copper — the
+     colour means "this is what it sounds like", not "this one is bigger". */
+  .voice { margin: 0 0 15px; font-size: 16px; line-height: 1.4; color: var(--ink); }
+  .voice b { font-weight: 400; color: #7a4116; border-bottom: 1px solid rgba(122,65,22,.35); }
+
+  .traits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+  .trait {
+    display: grid; grid-template-columns: minmax(88px, auto) 1fr minmax(66px, auto);
+    align-items: center; gap: 12px;
+    padding: 8px 14px; border-radius: 999px; cursor: pointer;
+    background: var(--chrome-pill);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.28),
+                0 1px 2px rgba(0,0,0,.22);
+    transition: transform .13s cubic-bezier(.2,.8,.3,1), box-shadow .13s ease;
   }
-  .traits span.lit { border-color: rgba(255,91,74,.45); color: #ffb9b0; }
+  .trait:hover, .trait:focus-visible {
+    outline: none; transform: translateY(-1px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,1), inset 0 -1px 0 rgba(0,0,0,.3),
+                0 4px 8px rgba(0,0,0,.26);
+  }
+  .trait[aria-expanded="true"] { transform: translateY(1px);
+    box-shadow: inset 0 2px 5px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.2); }
+  .trait__name {
+    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .16em;
+    text-transform: uppercase; color: #22252a; text-shadow: 0 1px 0 rgba(255,255,255,.6);
+  }
+  .trait__bar { display: flex; gap: 4px; }
+  .trait__bar i {
+    flex: 1; height: 11px; border-radius: 3px; background: var(--well);
+    box-shadow: inset 0 1px 3px rgba(0,0,0,.9), 0 1px 0 rgba(255,255,255,.5);
+  }
+  .trait__bar i.on {
+    background: linear-gradient(180deg, #dcffa8 0%, var(--phos) 45%, #4d7a2a 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.65), 0 0 7px rgba(163,230,104,.45),
+                0 1px 0 rgba(255,255,255,.5);
+  }
+  .trait__depth {
+    font-family: var(--serif); font-size: 13px; color: var(--ink-faint); text-align: right;
+  }
+  /* A word like "affectionate" eats the row on a phone and leaves the bar a
+     stub. Below this width the bar gets a line of its own. */
+  @media (max-width: 620px) {
+    .trait {
+      grid-template-columns: 1fr auto; row-gap: 9px; border-radius: 20px; padding: 11px 16px;
+      grid-template-areas: "name depth" "bar bar";
+    }
+    .trait__name  { grid-area: name; }
+    .trait__depth { grid-area: depth; }
+    .trait__bar   { grid-area: bar; }
+  }
+  .trait.lead {
+    background: linear-gradient(178deg,
+      #ffe3c6 0%, #dfa475 15%, #b47645 46%, #8d5327 47%, #c08355 76%, #f0cba6 94%, #c28f60 100%);
+  }
+  .trait.lead .trait__name { color: #2e1006; text-shadow: 0 1px 0 rgba(255,226,200,.45); }
+  .trait.lead .trait__depth { color: #4a1f07; }
+  .trait.lead .trait__bar i.on {
+    background: linear-gradient(180deg, #fff0dc 0%, #ffc98d 45%, #8a4d1c 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 0 7px rgba(255,201,141,.5);
+  }
 
-  .kv { display: flex; justify-content: space-between; gap: 12px; font-family: var(--mono);
-        font-size: 11px; color: var(--ink-faint); padding: 5px 0; border-bottom: 1px dotted var(--rule); }
-  .kv:last-child { border-bottom: none; }
-  .kv b { color: var(--ink-dim); font-weight: 400; }
+  /* the card reads as a readout, because everything the chain says on this
+     page is shown in a well cut into the metal */
+  .traitcard {
+    margin-top: 13px; padding: 15px 17px; border-radius: 14px;
+    background: var(--well); color: #86b95d;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+    box-shadow: inset 0 2px 7px rgba(0,0,0,.95), inset 0 0 0 1px rgba(255,255,255,.06),
+                0 1px 0 rgba(255,255,255,.55);
+  }
+  .traitcard h3 {
+    margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .2em;
+    text-transform: uppercase; color: #d8ff9f;
+  }
+  .traitcard p { margin: 0 0 9px; }
+  .traitcard p:last-child { margin-bottom: 0; }
+  .traitcard b { font-weight: 400; color: var(--phos); }
+  .traitcard .lead-note { color: #ffc861; }
 
-  a { color: var(--shell); }
+  /* ── actions parked at the end of a board row ────────────────────────── */
+  #directory li { grid-template-columns: 20px 1fr auto auto; }
+  .acts { display: flex; gap: 6px; }
+  .acts button {
+    border: 0; cursor: pointer; padding: 6px 11px; border-radius: 999px;
+    font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: #22252a; text-shadow: 0 1px 0 rgba(255,255,255,.55);
+    background: var(--chrome-pill);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.3),
+                0 1px 2px rgba(0,0,0,.25);
+    transition: transform .08s ease, box-shadow .1s ease;
+  }
+  .acts button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255,255,255,1), 0 3px 6px rgba(0,0,0,.24); }
+  .acts button:active:not(:disabled) { transform: translateY(1px); box-shadow: inset 0 2px 5px rgba(0,0,0,.4); }
+  .acts button:disabled { filter: grayscale(.75) opacity(.45); cursor: default; }
+  .dead-mark { color: #8d5327; }
+
+  .kv {
+    display: flex; justify-content: space-between; gap: 14px; align-items: baseline;
+    padding: 7px 0; border-bottom: 1px dotted var(--hair);
+    font-family: var(--mono); font-size: 10.5px; font-weight: 400; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .kv:last-of-type { border-bottom: none; }
+  .kv b { font-family: var(--mono); font-size: 14px; font-weight: 700; letter-spacing: 0;
+          text-transform: none; color: var(--ink); }
+
+  label.stack {
+    display: block; margin: 16px 0 7px;
+    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .18em;
+    text-transform: uppercase; color: #22252a; text-shadow: 0 1px 0 rgba(255,255,255,.65);
+  }
+  label.stack i { font-style: normal; letter-spacing: 0; text-transform: none;
+                  font-family: var(--serif); font-size: 13px; color: #4a4d51; }
+
+  /* ── the drawer nobody has to open ───────────────────────────────────── */
+  details.more > summary {
+    cursor: pointer; list-style: none;
+    font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--ink-faint);
+    text-shadow: 0 1px 0 rgba(255,255,255,.7);
+    transition: color .2s ease;
+  }
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more > summary::before { content: "▸"; display: inline-block; margin-right: 8px;
+                                   transition: transform .2s ease; }
+  details.more[open] > summary::before { transform: rotate(90deg); }
+  details.more > summary:hover { color: var(--ink); }
+  details.more[open] > summary { margin-bottom: 16px; }
+  .subhead {
+    margin: 24px 0 10px; padding-top: 16px;
+    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--ink-faint);
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='26' height='8' viewBox='0 0 26 8'><path d='M0 4 q3.25 -3.4 6.5 0 t6.5 0 t6.5 0 t6.5 0' fill='none' stroke='%231c1d1f' stroke-opacity='.4' stroke-width='1.1'/></svg>") repeat-x top;
+  }
+
+  a { color: #2d5a16; text-underline-offset: 2px; }
   [hidden] { display: none !important; }
+
+  @media (max-width: 560px) {
+    .wrap { padding: 30px 15px 80px; }
+    h1 { font-size: 28px; }
+    .tagline { font-size: 16.5px; }
+    /* No tighter than the desktop inset: the tube is drawn in absolute pixels,
+       so a narrow screen does not make it any thinner to clear. */
+    .slip__body { padding: 32px 33px 34px; }
+    .buttons { gap: 20px; }
+    .field { flex-wrap: wrap; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sheen::before, .led.on { animation: none; }
+  }
 </style>
 </head>
 <body>
+
+<!-- The three strokes every chrome frame is made of, plus the panel's own face.
+     They live here once and are referenced by every generated frame: paint
+     servers resolve in the user space of whatever element refers to them, so
+     one definition banded in absolute pixels lands identically on a 700px
+     panel and on a 250px bezel. spreadMethod="repeat" is what keeps the band
+     width fixed instead of stretching to the box — a stretched ramp is grey
+     plastic, repeated bands are steel. -->
+<svg class="defs" aria-hidden="true">
+  <linearGradient id="g-body" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="150" y2="103" spreadMethod="repeat">
+    <stop offset="0"    stop-color="#7c838b" /><stop offset=".13" stop-color="#d6dbe0" />
+    <stop offset=".26"  stop-color="#ffffff" /><stop offset=".39" stop-color="#c2c8cf" />
+    <stop offset=".52"  stop-color="#737a82" /><stop offset=".64" stop-color="#3b4147" />
+    <stop offset=".77"  stop-color="#9aa1a9" /><stop offset=".9"  stop-color="#e8ebee" />
+    <stop offset="1"    stop-color="#a8afb6" />
+  </linearGradient>
+  <linearGradient id="g-core" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="98" y2="67" spreadMethod="repeat">
+    <stop offset="0"   stop-color="#e6e9ec" /><stop offset=".2" stop-color="#ffffff" />
+    <stop offset=".44" stop-color="#ffffff" /><stop offset=".64" stop-color="#ccd2d8" />
+    <stop offset=".85" stop-color="#ffffff" /><stop offset="1"  stop-color="#dfe3e6" />
+  </linearGradient>
+  <linearGradient id="g-deep" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="124" y2="85" spreadMethod="repeat">
+    <stop offset="0"   stop-color="#2b3138" /><stop offset=".2" stop-color="#6d757e" />
+    <stop offset=".43" stop-color="#2f353c" /><stop offset=".63" stop-color="#5a626b" />
+    <stop offset=".86" stop-color="#333a41" /><stop offset="1"  stop-color="#2b3138" />
+  </linearGradient>
+  <linearGradient id="g-face" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#e6e4e0" /><stop offset="1" stop-color="#c4c2be" />
+  </linearGradient>
+  <symbol id="sig" viewBox="0 0 7 7">
+    <rect x="0" y="0" width="1" height="1" /><rect x="6" y="0" width="1" height="1" />
+    <rect x="0" y="1" width="2" height="1" /><rect x="5" y="1" width="2" height="1" />
+    <rect x="0" y="2" width="7" height="1" />
+    <rect x="0" y="3" width="1" height="1" /><rect x="2" y="3" width="3" height="1" /><rect x="6" y="3" width="1" height="1" />
+    <rect x="0" y="4" width="7" height="1" />
+    <rect x="0" y="5" width="2" height="1" /><rect x="3" y="5" width="1" height="1" /><rect x="5" y="5" width="2" height="1" />
+    <rect x="1" y="6" width="5" height="1" />
+  </symbol>
+</svg>
+
 <div class="wrap">
 
   <header>
@@ -347,167 +727,322 @@
     <!-- ── the toy ──────────────────────────────────────────────────────── -->
     <div class="toybox">
       <div class="device">
-        <div class="brandline"><span>AiPet</span><span id="modelTag">GEN-001</span></div>
+        <span class="antenna" aria-hidden="true"></span>
+        <span class="strap" aria-hidden="true"></span>
 
-        <div class="bezel">
-          <div class="glass">
-            <canvas id="lcd" width="96" height="72" aria-label="Pet screen"></canvas>
+        <div class="egg">
+          <div class="wordmark">AiPet</div>
+
+          <div class="bezel" data-frame="bezel">
+            <div class="glass">
+              <canvas id="lcd" width="96" height="72" aria-label="Pet screen"></canvas>
+            </div>
           </div>
-        </div>
 
-        <div class="buttons">
-          <button class="btn" id="btnA" disabled>A<small>select</small></button>
-          <button class="btn" id="btnB" disabled>B<small>enter</small></button>
-          <button class="btn" id="btnC" disabled>C<small>back</small></button>
-        </div>
+          <div class="buttons">
+            <button class="btn" id="btnA" disabled><span class="dome"></span><small><b>A</b>select</small></button>
+            <button class="btn" id="btnB" disabled><span class="dome"></span><small><b>B</b>enter</small></button>
+            <button class="btn" id="btnC" disabled><span class="dome"></span><small><b>C</b>back</small></button>
+          </div>
 
-        <div class="underside">
-          <div class="grille"><i></i><i></i><i></i><i></i><i></i><i></i></div>
-          <div class="led" id="led" title="network"></div>
+          <div class="underside">
+            <div class="grille" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <span class="etch" id="modelTag">GEN-001</span>
+            <span class="led" id="led" title="network"></span>
+          </div>
+
+          <!-- last child on purpose: it must paint over the shell and the
+               moulded wordmark, and under everything with a z-index -->
+          <span class="sheen" aria-hidden="true"></span>
         </div>
       </div>
 
       <p class="devicefoot">
-        <kbd>←</kbd> <kbd>→</kbd> select · <kbd>enter</kbd> confirm · <kbd>esc</kbd> back
+        <span><kbd>←</kbd><kbd>→</kbd> select</span>
+        <span><kbd>enter</kbd> confirm</span>
+        <span><kbd>esc</kbd> back</span>
       </p>
 
-      <!-- read out for screen readers and for anyone who wants the text -->
-      <p class="devicefoot" id="srOut" style="text-transform:none;letter-spacing:0;font-family:var(--serif);font-size:13px;color:var(--ink-faint)" aria-live="polite"></p>
+      <!-- read out for screen readers, and for anyone who wants the text -->
+      <p class="saidout" id="srOut" aria-live="polite"></p>
     </div>
 
-    <!-- ── the paper ────────────────────────────────────────────────────── -->
+    <!-- ── the paperwork ────────────────────────────────────────────────── -->
     <div class="slips">
 
-      <div class="slip">
-        <h2>Start here <em>a wallet, then a pet</em></h2>
+      <div class="slip" data-frame="panel">
+        <div class="slip__body">
+          <h2><svg class="sigil"><use href="#sig" /></svg> Start here <em>a wallet, then a pet</em></h2>
+          <div class="hr"></div>
 
-        <ol class="steps">
-          <li class="step" id="stepWallet">
-            <span class="num"><span>1</span></span>
-            <div class="stepbody">
-              <p class="steptitle">Connect a wallet</p>
-              <p class="hint" id="walletMeta">Your wallet signs each action. It is never
-                asked for a key, and this page never sees one.</p>
-              <button class="press hot" id="connectWallet">Connect wallet</button>
-            </div>
-          </li>
-
-          <li class="step" id="stepPet">
-            <span class="num"><span>2</span></span>
-            <div class="stepbody">
-              <p class="steptitle">Hatch a pet</p>
-              <p class="hint" id="petMeta">Yours alone: a contract of its own, deployed by
-                you, that nobody else can take away.</p>
-              <div class="row">
-                <input id="petName" placeholder="name it" maxlength="24" spellcheck="false" />
-                <input id="petCity" placeholder="city" value="Lisbon" spellcheck="false" />
+          <ol class="steps">
+            <li class="step" id="stepWallet">
+              <span class="num"><span>1</span></span>
+              <div class="stepbody">
+                <p class="steptitle">Connect a wallet</p>
+                <p class="hint" id="walletMeta">Your wallet signs each action. It is never
+                  asked for a key, and this page never sees one.</p>
+                <button class="press hot" id="connectWallet">Connect wallet</button>
               </div>
-              <button class="press" id="hatch" disabled>Hatch it</button>
-              <p class="hint">The city is not decoration — the pet looks up that city's real
-                weather itself, and talks about it.</p>
-            </div>
-          </li>
-        </ol>
+            </li>
 
-        <div id="status" class="console">Loading…</div>
-        <div class="row" style="margin-top:12px">
-          <button class="press" id="refresh" disabled>Refresh</button>
-          <button class="press" id="share" disabled>Copy link</button>
+            <li class="step" id="stepPet">
+              <span class="num"><span>2</span></span>
+              <div class="stepbody">
+                <p class="steptitle">Hatch a pet</p>
+                <p class="hint" id="petMeta">Yours alone: a contract of its own, deployed by
+                  you, that nobody else can take away.</p>
+                <div class="field"><label for="petName">Name it</label>
+                  <input id="petName" placeholder="name it" maxlength="24" spellcheck="false" /></div>
+                <div class="field"><label for="petCity">City</label>
+                  <input id="petCity" placeholder="city" value="Lisbon" spellcheck="false" /></div>
+                <button class="press" id="hatch" disabled>Hatch it</button>
+                <p class="hint">The city is not decoration — the pet looks up that city's real
+                  weather itself, and talks about it.</p>
+              </div>
+            </li>
+          </ol>
+
+          <div id="status" class="console">Loading…</div>
+          <div class="row" style="margin-top:14px">
+            <button class="press" id="refresh" disabled>Refresh</button>
+            <button class="press" id="share" disabled>Copy link</button>
+          </div>
         </div>
       </div>
 
-      <div class="slip">
-        <h2>Supplies <em>what the buttons spend</em></h2>
-        <label for="feedAmt">GEN per feeding</label>
-        <input id="feedAmt" type="number" min="0" step="0.01" value="0.05" />
-        <label for="visitAddr">Another pet to visit <span style="text-transform:none;letter-spacing:0">— owner only</span></label>
-        <input id="visitAddr" placeholder="0x… another pet's contract" spellcheck="false" />
-        <p class="hint">Your pet reads that contract, greets it by name, and its line is delivered
-          there as a consensus message. The other pet must already be finalized on-chain.</p>
-      </div>
-
-      <div class="slip" id="charBox" hidden>
-        <h2>Character <em>what living added</em></h2>
-        <div class="traits" id="traits"></div>
-        <p class="hint" id="charHint"></p>
-        <div class="row" id="charControls" hidden style="margin-top:12px">
-          <button class="press" id="freeze">Freeze</button>
-          <button class="press" id="forget">Reset</button>
+      <div class="slip" data-frame="panel" id="charBox" hidden>
+        <div class="slip__body">
+          <h2><svg class="sigil"><use href="#sig" /></svg> Character <em>what living added</em></h2>
+          <div class="hr"></div>
+          <p class="voice" id="charVoice"></p>
+          <ul class="traits" id="traits"></ul>
+          <div class="traitcard" id="traitCard" hidden></div>
+          <p class="hint" id="charHint"></p>
+          <div class="row" id="charControls" hidden style="margin-top:14px">
+            <button class="press" id="freeze">Freeze</button>
+            <button class="press" id="forget">Reset</button>
+          </div>
         </div>
       </div>
 
-      <div class="slip" id="ownerBox" hidden>
-        <h2>Owner <em>the food money</em></h2>
-        <div class="kv"><span>held by the contract</span><b id="balMeta">— GEN</b></div>
-        <label for="wdAmt">Withdraw</label>
-        <div class="row">
-          <input id="wdAmt" type="number" min="0" step="0.01" value="0.1" />
-          <button class="press slim" id="withdraw">Take it</button>
+      <div class="slip" data-frame="panel" id="ownerBox" hidden>
+        <div class="slip__body">
+          <h2><svg class="sigil"><use href="#sig" /></svg> Owner <em>the food money</em></h2>
+          <div class="hr"></div>
+          <div class="kv"><span>held by the contract</span><b id="balMeta">— GEN</b></div>
+          <label class="stack" for="wdAmt">Withdraw</label>
+          <div class="row">
+            <div class="field"><input id="wdAmt" type="number" min="0" step="0.01" value="0.1" /></div>
+            <button class="press slim" id="withdraw">Take it</button>
+          </div>
+          <p class="hint">The payout settles when the transaction <b>finalizes</b> — about half an
+            hour on Bradbury. The balance stays put until then; that is not a failure.</p>
         </div>
-        <p class="hint">The payout settles when the transaction <b>finalizes</b> — about half an
-          hour on Bradbury. The balance stays put until then; that is not a failure.</p>
       </div>
 
-      <div class="slip">
-        <h2>Fed by <em>who kept it alive</em></h2>
-        <ol class="board" id="board"><li class="empty">nobody has fed the pet yet</li></ol>
+      <div class="slip" data-frame="panel">
+        <div class="slip__body">
+          <h2><svg class="sigil"><use href="#sig" /></svg> Fed by <em>who kept it alive</em></h2>
+          <div class="hr"></div>
+          <p class="hint" style="margin-top:0">Anyone can feed this pet — it does not have to be
+            you. The GEN a stranger sends buys real satiety and then <b>stays in the pet's
+            contract</b>, where only the owner can withdraw it. Send someone the link and they
+            can keep it alive while you are away.</p>
+          <ol class="board" id="board" style="margin-top:12px"><li class="empty">nobody has fed the pet yet</li></ol>
+          <button class="press" id="shareFeed" style="margin-top:14px" disabled>Copy a link people can feed it from</button>
+        </div>
       </div>
 
       <!-- The shared board loads itself from a directory this page already knows
            about, so a cross-contract leaderboard needs no address typed in. -->
-      <div class="slip" id="dirBox" hidden>
-        <h2>Every pet <em>one board, many contracts</em></h2>
-        <p class="hint" id="dirMeta"></p>
-        <ol class="board" id="directory" style="margin-top:10px"></ol>
-        <button class="press" id="joinDir" style="width:100%;margin-top:12px" disabled>Add my pet to this board</button>
+      <div class="slip" data-frame="panel" id="dirBox" hidden>
+        <div class="slip__body">
+          <h2><svg class="sigil"><use href="#sig" /></svg> Every pet <em>who else is out there</em></h2>
+          <div class="hr"></div>
+          <p class="hint" style="margin-top:0">Every pet anyone has put on the shared board, with
+            what it has been fed. <b>Visit</b> sends your pet round to say hello — it reads that
+            contract and its line is delivered there. <b>Feed</b> puts a meal in a stranger's pet.</p>
+          <p class="hint" id="dirMeta"></p>
+          <ol class="board" id="directory" style="margin-top:10px"></ol>
+          <button class="press" id="joinDir" style="margin-top:14px" disabled>Add my pet to this board</button>
+        </div>
       </div>
 
-      <div class="slip">
-        <h2>Everything it has said</h2>
-        <ul class="feed" id="history"><li class="empty">nothing yet</li></ul>
+      <div class="slip" data-frame="panel">
+        <div class="slip__body">
+          <h2><svg class="sigil"><use href="#sig" /></svg> Everything it has said</h2>
+          <div class="hr"></div>
+          <ul class="feed" id="history"><li class="empty">nothing yet</li></ul>
+        </div>
       </div>
 
-      <div class="slip">
-        <details class="more">
-          <summary>For developers</summary>
+      <div class="slip" data-frame="panel">
+        <div class="slip__body">
+          <details class="more">
+            <summary>For developers</summary>
 
-          <p class="hint" style="margin-top:0">Nothing here is needed to play. It is here to
-            point the page at a different pet, a different network, or a different board.</p>
+            <p class="hint" style="margin-top:0">Nothing here is needed to play. It is here to
+              point the page at a different pet, a different network, or a different board.</p>
 
-          <label for="net">Network</label>
-          <select id="net">
-            <option value="testnetBradbury">Testnet Bradbury</option>
-            <option value="studionet">Studio (hosted)</option>
-            <option value="localnet">Localnet (localhost:4000)</option>
-          </select>
+            <label class="stack" for="net">Network</label>
+            <div class="field">
+              <select id="net">
+                <option value="testnetBradbury">Testnet Bradbury</option>
+                <option value="studionet">Studio (hosted)</option>
+                <option value="localnet">Localnet (localhost:4000)</option>
+              </select>
+            </div>
 
-          <label for="addr">Watch any pet</label>
-          <div class="row">
-            <input id="addr" placeholder="0x…" spellcheck="false" />
-            <button class="press slim" id="connect">Open</button>
-          </div>
+            <label class="stack" for="addr">Watch any pet</label>
+            <div class="row">
+              <div class="field"><input id="addr" placeholder="0x…" spellcheck="false" /></div>
+              <button class="press slim" id="connect">Open</button>
+            </div>
 
-          <label for="factoryAddr">Directory contract</label>
-          <div class="row">
-            <input id="factoryAddr" placeholder="0x…" spellcheck="false" />
-            <button class="press slim" id="loadDir">Load</button>
-          </div>
+            <label class="stack" for="factoryAddr">Directory contract</label>
+            <div class="row">
+              <div class="field"><input id="factoryAddr" placeholder="0x…" spellcheck="false" /></div>
+              <button class="press slim" id="loadDir">Load</button>
+            </div>
 
-          <p class="subhead">Signing without a wallet</p>
-          <p class="hint" style="margin-top:0">For headless testing, or a browser with no
-            wallet extension. A key typed into a web page is a key you must treat as
-            burnt — use a throwaway one, funded from the faucet, and nothing else.</p>
-          <div class="row">
-            <input id="pk" placeholder="0x… burner key" spellcheck="false" />
-            <button class="press slim" id="gen">New</button>
-          </div>
-          <button class="press" id="useKey" style="width:100%;margin-top:10px">Sign with this key</button>
-        </details>
+            <p class="subhead">Signing without a wallet</p>
+            <p class="hint" style="margin-top:0">For headless testing, or a browser with no
+              wallet extension. A key typed into a web page is a key you must treat as
+              burnt — use a throwaway one, funded from the faucet, and nothing else.</p>
+            <div class="row">
+              <div class="field"><input id="pk" placeholder="0x… burner key" spellcheck="false" /></div>
+              <button class="press slim" id="gen">New</button>
+            </div>
+            <button class="press" id="useKey" style="margin-top:12px">Sign with this key</button>
+          </details>
+        </div>
       </div>
 
     </div>
   </div>
 </div>
+
+<script type="module">
+// ═══════════════════════════════════════════════════════════════════════════
+// PART 0 — the frames
+//
+// Every chrome frame on the page is one closed curve, stroked three times:
+// wide and dark for the shoulders, narrower and banded for the body, narrow
+// and white for the specular core. Three concentric strokes on one path IS a
+// tube seen in cross-section, and a stroke is the one thing SVG antialiases
+// perfectly at any size.
+//
+// The wave is generated, not filtered. The obvious way to make a frame wobble
+// is feTurbulence into feDisplacementMap, and it looks wrong for a reason that
+// no amount of tuning fixes: a displacement map moves every pixel of an edge
+// by its own amount, so a hard edge comes out as loose pixels and stair-steps.
+// Here the wobble is in the geometry — each point of a rounded rectangle is
+// pushed along its own outward normal and the points are joined by a
+// Catmull-Rom spline — so there is no edge to tear, only a curve to fill.
+//
+// This block deliberately imports nothing. If the CDN below is down the page
+// still has its frames.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const FRAME = {
+  //         tube: full width of the metal   body/core: the inner strokes
+  //         wave: how far it swings          lambda: how long one swell is
+  panel: { tube: 19, body: 15, core: 5.5, radius: 26, wave: 3.5, lambda: 140, face: "url(#g-face)" },
+  bezel: { tube: 20, body: 15, core: 5,   radius: 26, wave: 3.2, lambda: 76,  face: "#23262a" },
+};
+const RIPPLE = 0.22;                       // the second, shorter swell's share
+/** Half a tube plus the deepest the wave can swing: nothing may sit inside it. */
+const clearance = (c) => c.tube / 2 + c.wave * (1 + RIPPLE) + 2;
+
+/**
+ * Walk a rounded rectangle, pushing every step outward by a sum of two sine
+ * swells. Wave counts are whole numbers of turns around the perimeter, so the
+ * curve closes on itself with no seam to give the trick away.
+ */
+function wavyPath(w, h, cfg, phase) {
+  const r = Math.min(cfg.radius, Math.min(w, h) / 2 - 1);
+  const sw = Math.max(0, w - 2 * r), sh = Math.max(0, h - 2 * r), arc = Math.PI * r / 2;
+  const legs = [
+    { line: 1, x: r,     y: 0,     dx:  1, dy:  0, nx:  0, ny: -1, len: sw },
+    { cx: w - r, cy: r,     a: -Math.PI / 2, len: arc },
+    { line: 1, x: w,     y: r,     dx:  0, dy:  1, nx:  1, ny:  0, len: sh },
+    { cx: w - r, cy: h - r, a: 0,            len: arc },
+    { line: 1, x: w - r, y: h,     dx: -1, dy:  0, nx:  0, ny:  1, len: sw },
+    { cx: r,     cy: h - r, a: Math.PI / 2,  len: arc },
+    { line: 1, x: 0,     y: h - r, dx:  0, dy: -1, nx: -1, ny:  0, len: sh },
+    { cx: r,     cy: r,     a: Math.PI,      len: arc },
+  ];
+  const L = legs.reduce((t, s) => t + s.len, 0);
+  if (!(L > 0)) return "";
+
+  const k1 = Math.max(4, Math.round(L / cfg.lambda));   // whole swells, hence seamless
+  const k2 = k1 * 2 + 1;
+  const N = Math.max(120, Math.round(L / 4));
+  const pts = [];
+  for (let i = 0, leg = 0, run = 0; i < N; i++) {
+    const s = (i / N) * L;
+    while (s - run > legs[leg].len && leg < legs.length - 1) { run += legs[leg].len; leg++; }
+    const g = legs[leg], d = s - run;
+    let x, y, nx, ny;
+    if (g.line) { x = g.x + g.dx * d; y = g.y + g.dy * d; nx = g.nx; ny = g.ny; }
+    else { const t = g.a + d / r; nx = Math.cos(t); ny = Math.sin(t); x = g.cx + r * nx; y = g.cy + r * ny; }
+    const push = cfg.wave * Math.sin((s / L) * k1 * 2 * Math.PI + phase)
+               + cfg.wave * RIPPLE * Math.sin((s / L) * k2 * 2 * Math.PI + phase * 1.7);
+    pts.push([x + nx * push, y + ny * push]);
+  }
+
+  // Catmull-Rom through the points, emitted as cubics — smooth, and closed.
+  const n = pts.length, at = (i) => pts[(i % n + n) % n];
+  const f = (v) => Math.round(v * 100) / 100;
+  let d = `M${f(at(0)[0])} ${f(at(0)[1])}`;
+  for (let i = 0; i < n; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    d += `C${f(p1[0] + (p2[0] - p0[0]) / 6)} ${f(p1[1] + (p2[1] - p0[1]) / 6)}`
+       + ` ${f(p2[0] - (p3[0] - p1[0]) / 6)} ${f(p2[1] - (p3[1] - p1[1]) / 6)}`
+       + ` ${f(p2[0])} ${f(p2[1])}`;
+  }
+  return d + "Z";
+}
+
+const SVGNS = "http://www.w3.org/2000/svg";
+const phases = new WeakMap();
+let phaseSeed = 0;
+
+function drawFrame(el) {
+  const cfg = FRAME[el.dataset.frame] || FRAME.panel;
+  const w = el.clientWidth, h = el.clientHeight;
+  if (w < 60 || h < 40) return;                       // hidden, or not laid out yet
+  if (!phases.has(el)) phases.set(el, (phaseSeed++ * 1.9) % (Math.PI * 2));
+
+  const pad = clearance(cfg);
+  const d = wavyPath(w - 2 * pad, h - 2 * pad, cfg, phases.get(el));
+  if (!d) return;
+
+  let svg = el.querySelector(":scope > svg.metal");
+  if (!svg) {
+    svg = document.createElementNS(SVGNS, "svg");
+    svg.setAttribute("class", "metal");
+    svg.setAttribute("aria-hidden", "true");
+    el.prepend(svg);
+  }
+  svg.setAttribute("width", w);
+  svg.setAttribute("height", h);
+  svg.innerHTML =
+    `<g transform="translate(${pad} ${pad})">` +
+    `<path d="${d}" fill="${cfg.face}"/>` +
+    `<path d="${d}" fill="none" stroke="url(#g-deep)" stroke-width="${cfg.tube}" stroke-linejoin="round"/>` +
+    `<path d="${d}" fill="none" stroke="url(#g-body)" stroke-width="${cfg.body}" stroke-linejoin="round"/>` +
+    `<path d="${d}" fill="none" stroke="url(#g-core)" stroke-width="${cfg.core}" stroke-linejoin="round"/>` +
+    `</g>`;
+}
+
+const frames = document.querySelectorAll("[data-frame]");
+const ro = new ResizeObserver((entries) => entries.forEach((e) => drawFrame(e.target)));
+frames.forEach((el) => { drawFrame(el); ro.observe(el); });
+// The panels are set in a webfont; their height changes the moment it lands.
+if (document.fonts?.ready) document.fonts.ready.then(() => frames.forEach(drawFrame));
+</script>
 
 <script type="module">
 import { createClient, createAccount, generatePrivateKey } from "https://esm.sh/genlayer-js@1.1.8";
@@ -524,7 +1059,7 @@ import * as chains from "https://esm.sh/genlayer-js@1.1.8/chains";
 const W = 96, H = 72;
 const lcd = document.getElementById("lcd");
 const ctx = lcd.getContext("2d");
-const INK = "#17200c";
+const INK = "#191d0d";
 
 // ── a 5×7 bitmap font, written as what it draws ───────────────────────────
 const GLYPHS = {
@@ -828,7 +1363,31 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g,
   c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 
 $("addr").value = LS.a; $("pk").value = LS.k; $("net").value = LS.n;
-$("visitAddr").value = localStorage.getItem("aipet_visit") || "";
+
+// ── how much food a press buys ────────────────────────────────────────────
+//
+// The contract charges WEI_PER_SATIETY = 0.01 GEN per point of satiety and caps
+// a single feed at FEED_CAP = 50, so these four portions are the whole useful
+// range and the last one is exactly the cap. They are stated in both currencies
+// because only one of them means anything to the pet.
+//
+// This used to be a number field in a panel called Supplies, three scroll
+// lengths away from the button that spends it. A quantity belongs at the moment
+// of spending, which on this device is the confirmation screen.
+const PORTIONS = [
+  { gen: "0.05", food: 5 },
+  { gen: "0.10", food: 10 },
+  { gen: "0.25", food: 25 },
+  { gen: "0.50", food: 50 },
+];
+let portion = Number(localStorage.getItem("aipet_portion"));
+if (!PORTIONS[portion]) portion = 0;
+const feedGen = () => PORTIONS[portion].gen;
+
+// Which pet the next visit goes to. Chosen by pressing Visit on a row of the
+// shared board — never typed, because a 42-character address is not something
+// anyone should be asked to retype to play with a toy.
+let visitTarget = localStorage.getItem("aipet_visit") || "";
 
 // ── a pet you can link to ─────────────────────────────────────────────────
 //
@@ -1022,12 +1581,24 @@ function drawBusy() {
 
 function drawConfirm() {
   const m = ui.pending;
-  drawIcon(m?.icon ?? "heart", 44, 18);
-  textCentered(m?.label ?? "", 30);
-  const detail = m?.key === "feed" ? `${$("feedAmt").value} gen`
-    : m?.key === "visit" ? short($("visitAddr").value.trim() || "0x0000000000")
+  drawIcon(m?.icon ?? "heart", 44, 16);
+  textCentered(m?.label ?? "", 27);
+
+  // Feeding is the one action with a quantity, so its confirmation is also the
+  // portion picker: A steps through the sizes, and both numbers are on screen —
+  // what it costs, and what the pet actually gets for it.
+  if (m?.key === "feed") {
+    // four lines have to fit between the menu rule at y=12 and the footer rule
+    // at y=60, and a 7px glyph box starting at 52 is the last one that clears it
+    const p = PORTIONS[portion];
+    textCentered(p.gen + " gen", 34);
+    textCentered("+" + p.food + " food", 43);
+    textCentered("a size b yes", 52);
+    return;
+  }
+  const detail = m?.key === "visit" ? short(visitTarget || "0x0000000000")
     : m?.key === "revive" ? `${fromWei(reviveCost ?? 0n).toFixed(2)} gen` : "";
-  if (detail) textCentered(detail, 40);
+  if (detail) textCentered(detail, 38);
   textCentered("b = yes  c = no", 50);
 }
 
@@ -1060,6 +1631,12 @@ function flash(btn) {
 function pressA() {                              // cycle the menu
   flash("btnA"); beep(720, 30);
   if (!client) return;
+  // on the feed confirmation A is the portion dial, not the menu
+  if (ui.view === "confirm" && ui.pending?.key === "feed") {
+    portion = (portion + 1) % PORTIONS.length;
+    localStorage.setItem("aipet_portion", String(portion));
+    return;
+  }
   if (ui.view === "talk") {
     // A pages the quote and wraps back to the top, so a long line can be
     // re-read without leaving the screen and coming back
@@ -1126,10 +1703,10 @@ async function runPending() {
     return;
   }
   if (m.key === "visit") {
-    const host = $("visitAddr").value.trim();
+    const host = visitTarget.trim();
     if (!/^0x[0-9a-fA-F]{40}$/.test(host)) {
-      setStatus("Put the other pet's contract address in Supplies first.", "err");
-      ui.message = "no address"; ui.view = "home"; return;
+      setStatus("Pick who to visit first — press Visit on a row of Every pet below.", "err");
+      ui.message = "pick a pet"; ui.view = "home"; return;
     }
     if (host.toLowerCase() === address.toLowerCase()) {
       setStatus("A pet cannot visit itself.", "err"); ui.message = "not itself"; ui.view = "home"; return;
@@ -1166,6 +1743,7 @@ function setBusy(b) {
   for (const id of ["btnA", "btnB", "btnC"]) $(id).disabled = b || !client || !address;
   $("refresh").disabled = b || !client || !address;
   $("share").disabled = b || !address;
+  $("shareFeed").disabled = b || !address;
   $("connect").disabled = b;
   $("connectWallet").disabled = b;
   $("hatch").disabled = b || !signerAddress;
@@ -1287,6 +1865,10 @@ function watchWallet(provider) {
     }
     await useSigner("wallet", accounts[0]);
     if (address) await loadState();
+    // The board's Feed buttons are gated on having a signer, so they are dead
+    // until it redraws — and a row of dead buttons right after connecting a
+    // wallet reads as "this does not work".
+    if (factoryAddress) loadDirectory({});
   });
   // The chain moving out from under us cannot be repaired silently — say it.
   provider.on("chainChanged", () => {
@@ -1446,15 +2028,18 @@ $("net").onchange = async () => {
   if (address) await loadState();
 };
 
-$("share").onclick = async () => {
+async function copyShareLink() {
   refreshShareLink();
   try {
     await navigator.clipboard.writeText(location.href);
-    setStatus("Link copied.\nAnyone who opens it lands on this pet and can feed it.", "ok");
+    setStatus("Link copied.\nAnyone who opens it lands on this pet and can feed it — "
+      + "the GEN they send stays in the contract for you to withdraw.", "ok");
   } catch {
     setStatus("Copy the address bar — it is a link straight to this pet.", "");
   }
-};
+}
+$("share").onclick = copyShareLink;
+$("shareFeed").onclick = copyShareLink;
 
 /** Reflect the two steps in the paper, so what is left to do is never a guess. */
 function paintSteps() {
@@ -1511,7 +2096,8 @@ async function doAction(fn, opts = {}) {
   try {
     setBusy(true);
     ui.view = "busy"; ui.progress = "sending";
-    const value = opts.value ?? (fn === "feed" ? toWei($("feedAmt").value) : 0n);
+    const before = fingerprint();          // what to wait for the node to move off
+    const value = opts.value ?? (fn === "feed" ? toWei(feedGen()) : 0n);
 
     // Ask before spending a round-trip on a transaction the node will refuse.
     // Every action costs gas, including the ones that send no value, so an empty
@@ -1529,10 +2115,15 @@ async function doAction(fn, opts = {}) {
       beep(180, 160);
       return false;
     }
-    const label = opts.label ?? (fn === "feed" ? $("feedAmt").value + " GEN" : "");
+    const label = opts.label ?? (fn === "feed" ? feedGen() + " GEN" : "");
     setStatus(`Sending ${fn}()${label ? " (" + label + ")" : ""}…\n`
       + "Waiting for consensus — the web request and the LLM take a while.");
-    const hash = await client.writeContract({ address, functionName: fn, args: opts.args ?? [], value });
+    // opts.target aims the call at a DIFFERENT contract — a stranger's pet, or
+    // the directory. It used to be done by assigning to `address` around the
+    // call, which also pointed the reload at that contract and briefly showed
+    // somebody else's pet in the device.
+    const target = opts.target ?? address;
+    const hash = await client.writeContract({ address: target, functionName: fn, args: opts.args ?? [], value });
     // Wait for ACCEPTED, not FINALIZED: state is applied at acceptance, while
     // finalization takes far longer. A real check() spends 40-60 s on the web
     // request plus the LLM, and a leader rotation adds another round on top.
@@ -1544,10 +2135,21 @@ async function doAction(fn, opts = {}) {
     });
     if (String(tx.status) !== "5" && String(tx.status) !== "7")
       throw new Error(`consensus ended as ${STATUS_NAME[Number(tx.status)] ?? tx.status}`);
-    setStatus(`${fn}() done ✓`, "ok");
-    ui.message = fn === "feed" ? "yum" : "done";
-    await loadState();
-    ui.view = fn === "check" || fn === "play" || fn === "pet" || fn === "feed" ? "talk" : "home";
+    ui.message = opts.target ? "sent" : fn === "feed" ? "yum" : "done";
+    if (opts.target) {
+      setStatus(`${fn}() done ✓`, "ok");     // a stranger's pet; ours did not change
+    } else {
+      ui.progress = "settling";
+      setStatus(`${fn}() accepted ✓\nWaiting for the node to serve the new state — `
+        + "consensus has applied it, the read catches up a moment later.");
+      const moved = await settleState(before);
+      setStatus(moved
+        ? `${fn}() done ✓`
+        : `${fn}() accepted ✓ — but the node is still serving the old state.\n`
+          + "It will catch up on the next refresh.", moved ? "ok" : "warn");
+    }
+    ui.view = !opts.target && (fn === "check" || fn === "play" || fn === "pet" || fn === "feed")
+      ? "talk" : "home";
     ui.scroll = 0;
     beep(1180, 70);
     return true;
@@ -1606,6 +2208,44 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden && client) pollTick();
 });
 
+/**
+ * Everything an action can change, as one comparable string.
+ *
+ * Reads nothing: it fingerprints the state already in hand, so it can be taken
+ * cheaply before a transaction and compared against after one.
+ */
+const fingerprint = () => JSON.stringify([
+  pet?.last_quote ?? "", pet?.satiety ?? "", pet?.mood ?? "",
+  pet?.total_fed_wei ?? "", pet?.revives ?? "", pet?.alive ?? "",
+  character?.evolutions ?? "",
+]);
+
+/**
+ * Read until the state actually moves off `before`, or give up.
+ *
+ * ACCEPTED means consensus applied the write, but a read issued in the same
+ * breath is still answered from the old state for a few seconds. Trusting that
+ * first read is what put the PREVIOUS line on the screen as though the pet had
+ * just said it, and then silently swapped it once the poll caught up.
+ *
+ * The background poll would get there on its own; this only stops the wrong
+ * answer from being shown first. It gives up rather than spinning forever —
+ * a pet that says the exact same sentence twice is unlikely but not impossible,
+ * and hanging on that would be worse than the stale line ever was.
+ */
+// A round is one loadState (seven reads, ~3 s against Bradbury) plus the gap,
+// so six rounds is roughly twenty seconds of patience. The state has been
+// measured landing after about five, which is round two.
+async function settleState(before, tries = 6, gap = 900) {
+  for (let i = 0; i < tries; i++) {
+    await loadState({ quiet: true });
+    if (fingerprint() !== before) return true;
+    ui.progress = "settling";
+    await new Promise(r => setTimeout(r, gap));
+  }
+  return false;
+}
+
 async function loadState(opts = {}) {
   const quiet = opts.quiet === true;
   try {
@@ -1662,21 +2302,119 @@ async function loadState(opts = {}) {
 
 // The character sheet. Levels come from the contract, and so does max_level, so
 // the dots can never disagree with the ceiling the contract actually enforces.
+// ── the character sheet ───────────────────────────────────────────────────
+//
+// This is the most interesting thing the contract does and it used to be six
+// grey pills. What matters, and what the panel now says out loud:
+//
+//   · the model picks which trait an event moved — from a CLOSED list the
+//     contract owns, so a pet can never talk itself into a new personality;
+//   · the two highest traits are written into the prompt, which is why the
+//     character is not decoration: it changes what the pet says next;
+//   · a nudge lands at most once per cooldown, so this moves slowly on purpose.
+//
+// The per-trait notes are written as tendencies, not rules, because there is no
+// rule in the contract to quote: nothing maps "play" to "playful". The model
+// decides, and claiming otherwise would be inventing mechanics.
+const TRAIT_NOTE = {
+  curious:      "Leans toward a pet that keeps looking outward. Tends to move when it checks the world — the weather in its city, the day's market — and finds something in it.",
+  affectionate: "The warm one. Tends to move when someone turns up and is kind to it: petting, feeding, a visitor at the door.",
+  playful:      "Tends to move after play, and after outings that went well.",
+  wary:         "Tends to move when things go badly — long stretches with no one there, running low on food, a stranger it did not warm to.",
+  gloomy:       "Tends to move when it is left alone or the world it reads about is grim.",
+  proud:        "Tends to move when it is well kept: a full belly, a good mood, someone who visits.",
+};
+const DEPTH_WORD = ["", "a little", "a little", "noticeably", "noticeably", "deeply"];
+
+let openTrait = null;
+
 function renderCharacter(c) {
   const traits = Array.isArray(c?.traits) ? c.traits : [];
   $("charBox").hidden = traits.length === 0;
   if (!traits.length) return;
   const max = Number(c.max_level) || 5;
+
+  // The lead pair, chosen the way the contract chooses it: level first, ties
+  // broken by position, and only traits above zero count.
+  const lead = traits
+    .map((t, i) => ({ name: String(t.name), level: Number(t.level) || 0, i }))
+    .filter(t => t.level > 0)
+    .sort((a, b) => b.level - a.level || a.i - b.i)
+    .slice(0, 2);
+  const isLead = (name) => lead.some(t => t.name === name);
+
+  $("charVoice").innerHTML = lead.length
+    ? "Right now it speaks as something "
+      + lead.map(t => `<b>${escapeHtml(DEPTH_WORD[Math.min(t.level, 5)])} `
+                     + `${escapeHtml(t.name)}</b>`).join(" and ")
+      + (lead.length > 1 ? " — those go into its prompt, and nothing else here does."
+                         : " — that goes into its prompt, and nothing else here does.")
+    : "A blank slate. Nothing it has lived through has moved it yet.";
+
   $("traits").innerHTML = traits.map(t => {
-    const level = Number(t.level) || 0;
-    return `<span class="${level ? "lit" : ""}">${escapeHtml(t.name)} `
-      + "●".repeat(level) + "○".repeat(Math.max(0, max - level)) + "</span>";
+    const name = String(t.name), level = Number(t.level) || 0;
+    const cells = Array.from({ length: max },
+      (_, i) => `<i class="${i < level ? "on" : ""}"></i>`).join("");
+    return `<li class="trait${isLead(name) ? " lead" : ""}" data-trait="${escapeHtml(name)}"`
+      + ` tabindex="0" role="button" aria-expanded="${openTrait === name}">`
+      + `<span class="trait__name">${escapeHtml(name)}</span>`
+      + `<span class="trait__bar">${cells}</span>`
+      + `<span class="trait__depth">${escapeHtml(level ? DEPTH_WORD[Math.min(level, 5)] : "—")}</span>`
+      + `</li>`;
   }).join("");
+
   $("charHint").textContent = c.evolving
-    ? `Every line the pet speaks may nudge one trait, at most once per `
-      + `${Number(c.cooldown_hours)} in-pet hours. ${Number(c.evolutions) || 0} so far.`
+    ? `Tap a trait to see what moves it. One nudge at a time, at most once per `
+      + `${Number(c.cooldown_hours)} in-pet hours — ${Number(c.evolutions) || 0} so far in this life.`
     : "The owner has frozen this character — experience no longer changes it.";
+
+  drawTraitCard(c, max, isLead);
 }
+
+function drawTraitCard(c, max, isLead) {
+  const box = $("traitCard");
+  const t = (c.traits || []).find(x => String(x.name) === openTrait);
+  if (!t) { box.hidden = true; box.innerHTML = ""; return; }
+  const name = String(t.name), level = Number(t.level) || 0;
+
+  // Cooldown is stated in the pet's own hours; a fast-clock pet burns through
+  // them faster, so it is converted before it is shown.
+  const realSecs = (Number(c.cooldown_hours) || 0) * 3600 / Math.max(1, timeScale);
+  const since = Number(c.last_evolved_ts)
+    ? Math.floor(Date.now() / 1000) - Number(c.last_evolved_ts) : Infinity;
+  const left = Math.ceil((realSecs - since) / 60);
+  const when = !c.evolving ? "frozen by the owner — nothing moves until it is unfrozen"
+    : since === Infinity || left <= 0 ? "ready — the next thing it says could move a trait"
+    : `about ${left} min before anything can move again`;
+
+  box.hidden = false;
+  box.innerHTML =
+    `<h3>${escapeHtml(name)} · ${level} of ${max}</h3>`
+    + `<p>${escapeHtml(TRAIT_NOTE[name] || "One of the six words the model may pick from.")}</p>`
+    + (isLead(name)
+        ? `<p class="lead-note">One of the two the contract writes into its prompt — `
+          + `this word is shaping what it says.</p>`
+        : level > 0
+          ? `<p>Not in its voice yet: only the top two reach the prompt.</p>`
+          : `<p>Never moved.</p>`)
+    + `<p><b>${escapeHtml(when)}</b></p>`;
+}
+
+// One listener on the list, so re-rendering the rows never leaks handlers.
+$("traits").addEventListener("click", (e) => {
+  const row = e.target.closest(".trait");
+  if (!row) return;
+  openTrait = openTrait === row.dataset.trait ? null : row.dataset.trait;
+  if (character) renderCharacter(character);
+});
+$("traits").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const row = e.target.closest(".trait");
+  if (!row) return;
+  e.preventDefault();
+  openTrait = openTrait === row.dataset.trait ? null : row.dataset.trait;
+  if (character) renderCharacter(character);
+});
 
 // ── the shared board ──────────────────────────────────────────────────────
 // A separate contract, so it loads on demand and its failures never touch the
@@ -1700,18 +2438,45 @@ $("factoryAddr").value = factoryAddress;
 $("loadDir").onclick = () => loadDirectory({ announce: true });
 $("joinDir").onclick = async () => {
   if (!factoryAddress) { setStatus("No directory loaded.", "err"); return; }
-  const saved = address;
-  try {
-    // doAction() targets the pet; registering targets the directory, so swap the
-    // address for exactly one call and put it back whatever happens.
-    address = factoryAddress;
-    const ok = await doAction("register", { args: [saved], label: short(saved) });
-    if (ok) setStatus("Registered ✓ — the pet is on the shared board.", "ok");
-  } finally {
-    address = saved;
-    await loadDirectory({});
-  }
+  const ok = await doAction("register", {
+    target: factoryAddress, args: [address], label: short(address),
+  });
+  if (ok) setStatus("Registered ✓ — the pet is on the shared board.", "ok");
+  await loadDirectory({});
 };
+
+// ── acting on somebody else's pet ─────────────────────────────────────────
+//
+// Both of these are the reason the board exists. Without them it is a table of
+// numbers about strangers, which is what it was, and the only way to reach
+// another pet was to paste its address into a field two panels away.
+$("directory").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn || busy) return;
+  const target = btn.dataset.addr;
+
+  if (btn.dataset.act === "visit") {
+    if (!address) { setStatus("Hatch a pet first — visiting is something YOUR pet does.", "err"); return; }
+    if (!isOwner) { setStatus("Only the owner can send this pet visiting.", "err"); return; }
+    visitTarget = target;
+    localStorage.setItem("aipet_visit", target);
+    const ok = await doAction("visit", { args: [target], label: short(target) });
+    if (ok) setStatus("Visit accepted ✓\nYour pet's line is on its way to " + short(target)
+      + " as a consensus message. Open that pet in a minute to see it arrive.", "ok");
+    return;
+  }
+
+  // Feeding a stranger's pet is an ordinary payable call to THEIR contract:
+  // the food lands in their pet, the GEN stays there for their owner, and the
+  // sender's address goes onto their board. Nothing about our pet changes,
+  // which is why this is targeted rather than swapped in.
+  const ok = await doAction("feed", {
+    target, value: toWei(feedGen()), label: feedGen() + " GEN → " + short(target),
+  });
+  if (ok) setStatus(`Fed ${short(target)} ✓ — ${feedGen()} GEN and +${PORTIONS[portion].food} `
+    + "satiety. You are on that pet's board now; the GEN belongs to its owner.", "ok");
+  await loadDirectory({});
+});
 
 async function loadDirectory({ announce }) {
   const addr = $("factoryAddr").value.trim();
@@ -1733,10 +2498,24 @@ async function loadDirectory({ announce }) {
       `${n} pet${n === 1 ? "" : "s"} registered · ${info.open_to_all ? "open to anyone" : "admin-only"}`;
     const me = (address || "").toLowerCase();
     $("directory").innerHTML = rows.length
-      ? rows.map((r, i) => `<li><span class="rank">${i + 1}</span>`
-          + `<span class="who${r.address.toLowerCase() === me ? " me" : ""}">`
-          + `${escapeHtml(r.name)} ${escapeHtml(short(r.address))}${r.alive ? "" : " ✝"}</span>`
-          + `<span class="amt">${fromWei(r.total_fed_wei).toFixed(3)}</span></li>`).join("")
+      ? rows.map((r, i) => {
+          const mine = r.address.toLowerCase() === me;
+          // Nobody visits or feeds their own pet from here — the device does
+          // that. A dead pet cannot be fed either; feed() reverts on one, and
+          // finding that out from a rejected transaction is a bad way to learn.
+          const acts = mine ? `<span class="acts"></span>`
+            : `<span class="acts">`
+              + `<button data-act="visit" data-addr="${escapeHtml(r.address)}"`
+              + `${address && isOwner ? "" : " disabled"} title="send your pet to say hello">visit</button>`
+              + `<button data-act="feed" data-addr="${escapeHtml(r.address)}"`
+              + `${r.alive && signerAddress ? "" : " disabled"} title="put a meal in this pet">feed</button>`
+              + `</span>`;
+          return `<li><span class="rank">${i + 1}</span>`
+            + `<span class="who${mine ? " me" : ""}">${escapeHtml(r.name)} `
+            + `${escapeHtml(short(r.address))}`
+            + `${r.alive ? "" : ` <span class="dead-mark">✝</span>`}</span>`
+            + `<span class="amt">${fromWei(r.total_fed_wei).toFixed(3)}</span>${acts}</li>`;
+        }).join("")
       : `<li class="empty">no pets registered yet</li>`;
     const listed = rows.some(r => r.address.toLowerCase() === me);
     $("dirBox").hidden = false;

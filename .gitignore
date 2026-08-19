@@ -22,3 +22,6 @@ build/
 frontend/ai_pet.py
 # agent-local config: launch.json points at a machine-specific scratchpad path
 .claude/
+# design reference images (mood board for the liquid-chrome redesign) — 5 MB of
+# inputs to the work, not part of the site. Nothing in frontend/ references them.
+assets/
