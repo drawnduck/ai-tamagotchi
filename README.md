@@ -40,7 +40,7 @@ Implements the build spec [`spec_1_ai_tamagotchi.md`](spec_1_ai_tamagotchi.md).
 
 ## Playing it
 
-**[Open it](https://drawnduck.github.io/ai-tamagotchi/)**, then two presses:
+**[Open it](https://youraipet.xyz)**, then two presses:
 
 1. **Connect wallet.** MetaMask, or anything else that injects `window.ethereum`. The page adds
    Testnet Bradbury itself the first time — a wallet has never heard of chain 4221, and being told
@@ -68,7 +68,7 @@ everybody**, and `allow_public_feed` is on by default. Whoever feeds it goes on 
 Press **Copy link** and send it. A visitor lands on the pet, not on a form:
 
 ```
-https://drawnduck.github.io/ai-tamagotchi/?pet=0xda5779bB0c0dDaE864822CeF77938C6abc7b5C89
+https://youraipet.xyz/?pet=0xda5779bB0c0dDaE864822CeF77938C6abc7b5C89
 ```
 
 Reading needs nothing at all — no wallet, no key, no funds. The device, the meters, the pet's lines,
@@ -91,9 +91,15 @@ npm run frontend           # http://127.0.0.1:5577
 from esm.sh at runtime. One thing is generated: `frontend/ai_pet.py`, the stripped contract the
 page fetches to hatch a pet. `npm run frontend` builds it before serving and the workflow builds it
 before publishing; it is gitignored on purpose, so a stale copy of the contract can never ship
-beside a newer `contracts/ai_pet.py`. Two ways to put it online, both free and neither needing a
-domain:
+beside a newer `contracts/ai_pet.py`. It is published at
+**[youraipet.xyz](https://youraipet.xyz)**. Three ways to put it online — the first is how that
+address is served, the other two are free and need no domain at all:
 
+* **Your own server.** [`deploy/deploySite.sh`](deploy/deploySite.sh) builds the contract, refuses a
+  page that is not self-contained, rsyncs the two files, syncs
+  [`deploy/youraipet.caddy`](deploy/youraipet.caddy) into `/etc/caddy/sites.d/`, and health-checks
+  the public name. Caddy issues and renews the certificate itself. HTTPS is not decoration here:
+  the share buttons use `navigator.clipboard`, which only exists in a secure context.
 * **GitHub Pages.** [`.github/workflows/pages.yml`](.github/workflows/pages.yml) publishes
   `frontend/` on every push to `main`, and `enablement: true` turns Pages on by itself — there is
   nothing to switch in the repo settings. The address is `https://<user>.github.io/<repo>/`. The
@@ -102,8 +108,8 @@ domain:
 * **Netlify / Cloudflare Pages drop.** Drag the `frontend/` folder onto their upload box. No git,
   no account plumbing, an address in about a minute.
 
-A custom domain is optional everywhere and costs roughly $10–15 a year. Nothing in the page depends
-on one.
+A custom domain is optional on the two free hosts and costs roughly $10–15 a year. Nothing in the
+page depends on one — the site is the same two files at every address.
 
 ---
 

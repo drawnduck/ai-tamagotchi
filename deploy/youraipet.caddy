@@ -1,0 +1,75 @@
+# Caddy site file for the tamagotchi — youraipet.xyz
+#
+# This belongs in /etc/caddy/sites.d/youraipet.caddy — NOT in the main
+# Caddyfile. That file is overwritten wholesale by sonoglyph's deploy script
+# (its own header says so), so a block written there would vanish on their next
+# deploy. The main Caddyfile ends with `import /etc/caddy/sites.d/*.caddy`,
+# which is the seam this file plugs into. 138.201.92.157 is a shared box —
+# sonoglyph, arcman, frameloop and noiseradar all live on it.
+#
+# Install:
+#   scp deploy/youraipet.caddy root@138.201.92.157:/etc/caddy/sites.d/youraipet.caddy
+#   ssh root@138.201.92.157 'caddy validate --config /etc/caddy/Caddyfile && systemctl reload caddy'
+# Or run deploy/deploySite.sh, which syncs the files and this config together.
+#
+# Caddy obtains and renews the certificate itself on first request. Do not
+# install before both names resolve here: a failed ACME challenge retries on a
+# backoff and Let's Encrypt caps failures at five per hostname per hour, so an
+# early install just spends that budget on nothing.
+
+youraipet.xyz {
+	encode zstd gzip
+
+	root * /srv/youraipet/web
+	file_server
+
+	# The site is two files: index.html and the stripped contract the page
+	# fetches to hatch a pet. They are a PAIR — a browser holding last week's
+	# index.html against this week's contract is exactly the failure the
+	# gitignore on frontend/ai_pet.py exists to prevent. `no-cache` is not
+	# `no-store`: the browser still caches, it just revalidates first, and
+	# Caddy answers an unchanged file with a 304 off the ETag it sets itself.
+	header Cache-Control "no-cache"
+
+	# The page reads this file with fetch(), but a player about to spend gas
+	# deploying it should be able to open it in a tab and read it first.
+	# Without this Go's mime table hands out text/x-python, which browsers
+	# download instead of showing.
+	@contract path /ai_pet.py
+	header @contract Content-Type "text/plain; charset=utf-8"
+
+	header {
+		# The page is one document with inline CSS and inline module scripts,
+		# and it reaches exactly four places at runtime. Naming them means a
+		# fifth has to be added deliberately rather than arriving unnoticed:
+		#
+		#   script-src  esm.sh          — genlayer-js@1.1.8, imported at runtime
+		#   style-src   googleapis      — the Google Fonts stylesheet
+		#   font-src    gstatic         — the font files that stylesheet points to
+		#   connect-src rpc-bradbury    — every chain read and write
+		#   connect-src 'self'          — fetch("ai_pet.py") on the hatch button
+		#
+		# 'unsafe-inline' is load-bearing on both script-src and style-src: the
+		# whole app is inline. MetaMask's injected provider is a content script
+		# and is not subject to page CSP, so connecting a wallet needs nothing
+		# here. img-src carries data: for the four inline SVG backgrounds.
+		Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://rpc-bradbury.genlayer.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}
+
+# One canonical address. A pet is shared by link — ?pet=0x… — and serving the
+# same page under two names would split those links for no benefit. www exists
+# only because people type it.
+www.youraipet.xyz {
+	redir https://youraipet.xyz{uri} permanent
+}
