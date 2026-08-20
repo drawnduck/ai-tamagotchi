@@ -1662,8 +1662,38 @@ async function gasCeiling(input) {
   }
   return _blockGasCap;
 }
+// 1b. Bradbury throttles by GAS, not by request count: a busy node refuses the
+//     transaction outright with -32005 and tells you when to come back. That is
+//     a rejection, not a pending send — nothing was accepted — so re-posting the
+//     identical signed body is safe: same nonce, same signature. Without this a
+//     player just sees "Fail to create" and has to guess that pressing the same
+//     button again is the whole fix.
+const RATE_LIMITED = -32005;
+const RATE_LIMIT_TRIES = 6;
+
+/** ms to wait before re-sending, or null when this is not a throttle answer. */
+async function retryAfterMs(res) {
+  try {
+    const payload = await res.clone().json();
+    if (payload?.error?.code !== RATE_LIMITED) return null;
+    // `data` arrives as an object on some nodes and a JSON string on others.
+    const data = payload.error.data;
+    const bag = typeof data === "string" ? JSON.parse(data) : data;
+    const ms = Number(bag?.retryAfterMs);
+    return Number.isFinite(ms) && ms >= 0 ? ms : 1000;
+  } catch { return null; }
+}
+
 window.fetch = async (input, init) => {
-  const res = await _fetch(input, init);
+  let res = await _fetch(input, init);
+  for (let tries = 0; tries < RATE_LIMIT_TRIES; tries++) {
+    const wait = await retryAfterMs(res);
+    if (wait === null) break;
+    // A little past what the node asked for: it is a moving window, and coming
+    // back at the exact millisecond tends to be refused again.
+    await new Promise(r => setTimeout(r, wait + 300));
+    res = await _fetch(input, init);
+  }
   if (typeof init?.body !== "string" || !init.body.includes("eth_estimateGas")) return res;
   try {
     if (JSON.parse(init.body).method !== "eth_estimateGas") return res;
