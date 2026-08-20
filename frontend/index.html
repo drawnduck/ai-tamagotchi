@@ -2512,7 +2512,7 @@ async function ensureWalletOnChain(provider, chain) {
 }
 
 /** Adopt a signer and say so, including the balance. */
-async function useSigner(mode, addr, { silent = false } = {}) {
+async function useSigner(mode, addr, { silent = false, switched = false } = {}) {
   signerMode = mode; signerAddress = addr;
   rebuildClient();
   const funds = await walletBalance();
@@ -2533,7 +2533,7 @@ async function useSigner(mode, addr, { silent = false } = {}) {
   paintSteps();
   // Not awaited: the shelf filling in (and a returning player's pet opening)
   // must never hold the "connected" answer hostage to a directory read.
-  refreshMyPets({ autoOpen: true });
+  refreshMyPets({ autoOpen: true, switched });
 }
 
 let walletWatched = false;
@@ -2548,7 +2548,7 @@ function watchWallet(provider) {
       $("walletMeta").textContent = "The wallet disconnected. Reconnect to play.";
       setStatus("The wallet disconnected.", "warn"); paintSteps(); return;
     }
-    await useSigner("wallet", accounts[0]);
+    await useSigner("wallet", accounts[0], { switched: true });
     if (address) await loadState();
     // The board's Feed buttons are gated on having a signer, so they are dead
     // until it redraws — and a row of dead buttons right after connecting a
@@ -2574,7 +2574,7 @@ $("connectWallet").onclick = async () => {
     if (!accounts?.length) throw new Error("The wallet returned no account.");
     await ensureWalletOnChain(provider, currentChain());
     walletProvider = provider; account = null;
-    await useSigner("wallet", accounts[0]);
+    await useSigner("wallet", accounts[0], { switched: true });
     watchWallet(provider);
     if (address) await loadState();
   } catch (e) {
@@ -2598,7 +2598,7 @@ $("useKey").onclick = async () => {
     LS.k = pk;
     walletProvider = null;
     account = createAccount(pk);
-    await useSigner("key", account.address);
+    await useSigner("key", account.address, { switched: true });
     if (address) await loadState();
   } catch (e) {
     setStatus("Could not use that key: " + (e?.message || e), "err");
@@ -2712,12 +2712,14 @@ async function openPet(addr, { announce = false } = {}) {
 
 // ── the shelf: which pets belong to this wallet ───────────────────────────
 //
-// Hatching deploys a contract and registers it nowhere, so no single place
-// knows "this wallet's pets". Two partial sources, merged: every pet this
-// browser hatched (kept per-wallet under aipet_mine) and every pet the
-// directory lists under this owner (get_pets is the cheap storage read — no
-// sub-VM per pet, unlike the leaderboard). A re-installed browser recovers
-// from the directory; an unregistered pet survives in localStorage.
+// The chain is the record of ownership; this browser is only a cache of it.
+// Three sources, merged, in order of authority: every pet the explorer says
+// this wallet DEPLOYED (a hatch is a deploy transaction from the owner — the
+// one index the RPC itself cannot provide), every pet the directory lists
+// under this owner (get_pets is the cheap storage read — no sub-VM per pet,
+// unlike the leaderboard), and whatever aipet_mine already cached. The merge
+// is written back to aipet_mine, so a pet recovered once from the network
+// stays on the shelf even when the explorer is unreachable.
 let myPets = [];
 
 function mineAll() {
@@ -2734,45 +2736,131 @@ function rememberPet(addr, name) {
   const hit = list.find(p => p.address.toLowerCase() === addr.toLowerCase());
   if (hit && (!clean || hit.name === clean)) return;
   if (hit) hit.name = clean;
-  else list.push({ address: addr, name: clean || "pet" });
+  // First-seen stands in for hatch time until the explorer supplies the real
+  // one — close enough, since owned pets are remembered the moment they hatch.
+  else list.push({ address: addr, name: clean || "pet", ts: Math.floor(Date.now() / 1000) });
   localStorage.setItem("aipet_mine", JSON.stringify(all));
   const shown = myPets.find(p => p.address.toLowerCase() === addr.toLowerCase());
   if (shown) shown.name = clean || shown.name;
-  else myPets.push({ address: addr, name: clean || "pet" });
+  else myPets.push({ address: addr, name: clean || "pet", ts: Math.floor(Date.now() / 1000) });
   renderPetRail();
 }
 
-async function refreshMyPets({ autoOpen = false } = {}) {
+async function directoryPetsOf(me) {
+  const rows = [];
+  if (!client || !factoryAddress) return rows;
+  try {
+    // page through the roster; the directory is unbounded but a wallet is not
+    for (let offset = 0; offset < 200; offset += 50) {
+      const page = await client.readContract({
+        address: factoryAddress, functionName: "get_pets", args: [offset, 50],
+      });
+      if (!Array.isArray(page) || !page.length) break;
+      for (const r of page) {
+        if (String(r.owner || "").toLowerCase() === me) rows.push(r);
+      }
+      if (page.length < 50) break;
+    }
+  } catch { /* directory unreachable — the other sources still stand */ }
+  return rows;
+}
+
+// The RPC cannot answer "transactions FROM this address", but Bradbury's
+// explorer indexes exactly that, and a hatch IS a deploy transaction from the
+// owner. So: ask for the wallet's deploys, probe each created contract once
+// (get_owner is the authoritative test, get_state supplies the name), and keep
+// the verdicts in aipet_probe so every later visit costs one HTTP call. A
+// contract that fails the probe is remembered as not-a-pet — unless the deploy
+// is minutes old, because a pet not yet answering is not the same as not a pet.
+//
+// /exapi is OUR host proxying the explorer's /api, not the explorer itself: it
+// sends no CORS headers, so the browser may only ask it through a same-origin
+// seam (deploy/youraipet.caddy in production, serve.mjs in development). On a
+// host without the seam the fetch fails and the shelf falls back to the
+// directory and the local cache — degraded, never broken.
+const EXPLORER_API = { testnetBradbury: "/exapi" };
+const PROBE_MAX = 12;   // fresh probes per sweep; verdicts accumulate across visits
+
+function probeVerdicts() {
+  try { return JSON.parse(localStorage.getItem("aipet_probe") || "{}"); }
+  catch { return {}; }
+}
+
+async function walletPetsFromChain(me) {
+  const base = EXPLORER_API[$("net").value];
+  if (!base || !client) return [];
+  const res = await fetch(`${base}/v1/transactions?address=${me}&page=1&page_size=100`);
+  const txs = (await res.json())?.transactions || [];
+  const deploys = [];
+  for (const t of txs) {
+    if (!t?.data?.params?.encoded_data?.contract_code) continue;
+    const addr = t.to_address;   // for a deploy row this is the created contract
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr || "")) continue;
+    if (String(t.from_address || "").toLowerCase() !== me) continue;
+    if (!deploys.some(d => d.addr.toLowerCase() === addr.toLowerCase())) {
+      deploys.push({ addr, ts: Number(t.submission_timestamp) || 0 });
+    }
+  }
+  const verdicts = probeVerdicts();
+  const pets = [];
+  let probes = 0;
+  for (const d of deploys) {          // newest first, as the explorer returns them
+    const key = d.addr.toLowerCase();
+    let v = verdicts[key];
+    if (v === undefined) {
+      if (probes >= PROBE_MAX) continue;
+      probes++;
+      try {
+        const [owner, s] = await Promise.all([
+          client.readContract({ address: d.addr, functionName: "get_owner", args: [] }),
+          client.readContract({ address: d.addr, functionName: "get_state", args: [] }),
+        ]);
+        v = String(owner).toLowerCase() === me && typeof s?.name === "string"
+          ? { name: String(s.name).slice(0, 24) } : null;
+      } catch { v = null; }
+      if (v || Date.now() / 1000 - d.ts > 600) {
+        verdicts[key] = v;
+        try { localStorage.setItem("aipet_probe", JSON.stringify(verdicts)); } catch {}
+      }
+    }
+    // ts rides along even for cached verdicts: the shelf sorts by hatch time,
+    // and probes discover older pets on later visits, so insertion order lies.
+    if (v) pets.push({ address: d.addr, name: v.name || "pet", ts: d.ts });
+  }
+  return pets;
+}
+
+async function refreshMyPets({ autoOpen = false, switched = false } = {}) {
   if (!signerAddress) { myPets = []; renderPetRail(); return; }
   const me = signerAddress.toLowerCase();
-  const fromDir = [];
-  if (client && factoryAddress) {
-    try {
-      // page through the roster; the directory is unbounded but a wallet is not
-      for (let offset = 0; offset < 200; offset += 50) {
-        const rows = await client.readContract({
-          address: factoryAddress, functionName: "get_pets", args: [offset, 50],
-        });
-        if (!Array.isArray(rows) || !rows.length) break;
-        for (const r of rows) {
-          if (String(r.owner || "").toLowerCase() === me) fromDir.push(r);
-        }
-        if (rows.length < 50) break;
-      }
-    } catch { /* directory unreachable — the local list still stands */ }
-  }
+  const [fromDir, fromChain] = await Promise.all([
+    directoryPetsOf(me),
+    walletPetsFromChain(me).catch(() => []),
+  ]);
+  if (me !== (signerAddress || "").toLowerCase()) return;  // the signer moved on
   // The local list is read AFTER the awaits above, not before: while the
-  // directory answered, loadState may have remembered the pet on screen, and a
+  // network answered, loadState may have remembered the pet on screen, and a
   // stale snapshot taken up front would overwrite that entry right off the rail.
   const merged = new Map();
   for (const p of mineAll()[me] || []) merged.set(p.address.toLowerCase(), { ...p });
-  for (const r of fromDir) {
+  for (const r of [...fromChain, ...fromDir]) {
     const key = String(r.address).toLowerCase();
     const known = merged.get(key);
-    if (known) { if (r.name && known.name === "pet") known.name = r.name; }
-    else merged.set(key, { address: r.address, name: r.name || "pet" });
+    if (known) {
+      if (r.name && (!known.name || known.name === "pet")) known.name = r.name;
+      if (r.ts && !known.ts) known.ts = r.ts;
+    } else merged.set(key, { address: r.address, name: r.name || "pet", ts: r.ts });
   }
-  myPets = [...merged.values()];
+  // Hatch order, oldest first: "the last pet on the shelf" — what Welcome back
+  // opens — must mean the newest pet, and probes find OLDER pets on later
+  // visits, so insertion order cannot be trusted. Entries with no known hatch
+  // time sort to the front (the sort is stable) rather than pass for new.
+  myPets = [...merged.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  try {
+    const all = mineAll();
+    all[me] = myPets.map(p => ({ address: p.address, name: p.name, ...(p.ts ? { ts: p.ts } : {}) }));
+    localStorage.setItem("aipet_mine", JSON.stringify(all));
+  } catch { /* storage refused — the shelf still works for this session */ }
   renderPetRail();
   // A returning player should land on their pet, not on a form. Only when the
   // page is not already pointed anywhere — a shared link always wins.
@@ -2781,6 +2869,29 @@ async function refreshMyPets({ autoOpen = false } = {}) {
     await openPet(last.address);
     setStatus(`Welcome back — opened ${last.name} (${short(last.address)}).\n`
       + (myPets.length > 1 ? "The shelf on the right switches between your pets." : ""), "ok");
+    return;
+  }
+  // A DIFFERENT signer just took over. If it does not own the pet on screen,
+  // move it into its own game — except when the open pet is exactly what the
+  // page's link pointed at: a visitor who followed a friend's link and then
+  // connected did so to feed THAT pet, not to be led somewhere else.
+  const ownsOpen = !!address && myPets.some(p => p.address.toLowerCase() === address.toLowerCase());
+  if (switched && address && !ownsOpen
+      && address.toLowerCase() !== linked.pet.toLowerCase()) {
+    if (myPets.length) {
+      const last = myPets[myPets.length - 1];
+      const was = short(address);
+      await openPet(last.address);
+      setStatus(`${was} belongs to another wallet — opened your ${last.name} `
+        + `(${short(last.address)}) instead.`, "ok");
+    } else {
+      stopAutoRefresh();
+      address = ""; LS.a = ""; $("addr").value = "";
+      renderPetRail();
+      activateRoute("new-pet");
+      setStatus("This wallet has no pets yet — name one and hatch it.", "ok");
+      paintSteps();
+    }
   }
 }
 

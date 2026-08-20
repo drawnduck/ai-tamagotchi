@@ -23,6 +23,18 @@ youraipet.xyz {
 	root * /srv/youraipet/web
 	file_server
 
+	# The Bradbury explorer indexes "transactions FROM this address" — the one
+	# query the RPC cannot answer, and how the page finds every pet a wallet
+	# ever hatched. The explorer sends no CORS headers, so the browser may not
+	# ask it directly; this same-origin pass-through is the seam. One upstream,
+	# GET-shaped read-only API, path rewritten /exapi/* -> /api/*.
+	handle_path /exapi/* {
+		rewrite * /api{path}
+		reverse_proxy https://explorer-bradbury.genlayer.com {
+			header_up Host {upstream_hostport}
+		}
+	}
+
 	# The site is two files: index.html and the stripped contract the page
 	# fetches to hatch a pet. They are a PAIR — a browser holding last week's
 	# index.html against this week's contract is exactly the failure the

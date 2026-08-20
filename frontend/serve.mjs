@@ -29,9 +29,25 @@ const TYPES = {
   ".py": "text/plain; charset=utf-8",
 };
 
+// The page asks /exapi for the wallet's deploy history (the explorer itself
+// sends no CORS headers). Production has the same seam in deploy/youraipet.caddy;
+// the two must forward to the same place or the shelf works only when deployed.
+const EXPLORER = "https://explorer-bradbury.genlayer.com";
+
 http
   .createServer(async (req, res) => {
-    const rel = decodeURIComponent(new URL(req.url, "http://x").pathname);
+    const url = new URL(req.url, "http://x");
+    if (url.pathname.startsWith("/exapi/")) {
+      try {
+        const up = await fetch(`${EXPLORER}/api${url.pathname.slice("/exapi".length)}${url.search}`);
+        res.writeHead(up.status, { "content-type": up.headers.get("content-type") ?? "application/json" });
+        res.end(Buffer.from(await up.arrayBuffer()));
+      } catch {
+        res.writeHead(502).end("explorer unreachable");
+      }
+      return;
+    }
+    const rel = decodeURIComponent(url.pathname);
     const file = path.join(ROOT, rel === "/" ? "index.html" : rel);
     // never serve outside frontend/
     if (!file.startsWith(ROOT)) {
