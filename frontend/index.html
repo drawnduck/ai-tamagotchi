@@ -2025,8 +2025,13 @@ function drawStats() {
   text("mood", 2, 24); bar(32, 24, 62, Number(pet?.mood ?? 0));
   text("well", 2, 33); bar(32, 33, 62, Number(pet?.health ?? 0));
   text(`${pet?.stage ?? "-"} ${Number(pet?.age_days ?? 0)}d`, 2, 43);
-  // the market as the contract reports it: a category, never a price
-  text(`sky ${String(pet?.market || "-").slice(0, 8)}`, 2, 52);
+  // the world as the contract reports it: coarse categories, never a raw
+  // reading or a price. `condition` only exists on a pet deployed with the
+  // world-hangover contract — an older one has no such key and keeps showing
+  // just its market, which is what it has always shown.
+  const sky = [String(pet?.condition ?? "").trim(), String(pet?.market ?? "").trim()]
+    .filter(Boolean).map(w => w.slice(0, 7));
+  text(sky.length ? sky.join(" ") : "sky -", 2, 52);
 }
 
 function drawTalk() {

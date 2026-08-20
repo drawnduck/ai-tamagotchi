@@ -54,6 +54,9 @@ REVIVE_SATIETY = 50          # mirrors the contract constant
 REVIVE_MOOD = 50             # mirrors the contract constant
 REVIVE_HEALTH = 60           # mirrors the contract constant
 PLAY_MOOD_ELDER = 5          # mirrors the contract constant
+MOOD_PER_HOUR = 1            # mirrors the contract constant
+WORLD_STALE_H = 48           # mirrors the contract constant
+WET_MOOD_EXTRA = 1           # mirrors the contract constant
 EGG_SATIETY_PER_HOUR = 1     # mirrors STAGE_SATIETY_PER_HOUR["egg"]
 KITTEN_SATIETY_PER_HOUR = 3  # mirrors STAGE_SATIETY_PER_HOUR["kitten"]
 ELDER_STARVE_PER_HOUR = 2    # mirrors STAGE_STARVE_PER_HOUR["elder"]
@@ -193,8 +196,12 @@ def test_check_reads_weather_and_speaks(direct_vm, direct_deploy):
     pet = direct_deploy(CONTRACT, *CTOR)
     quote = pet.check()
     s = pet.get_state()
-    # rain (code 61) -> _apply_world mood -3 (70 -> 67); then mood_delta -1 -> 66
+    # rain (code 61) -> _apply_world mood -3 (70 -> 67); then mood_delta -1 -> 66.
+    # Unchanged by the world hangover, and that is the point: this check billed
+    # no idle hours at all, and even if it had, they happened BEFORE the rain was
+    # read — see test_rainy_hangover_starts_on_the_next_write_not_the_check.
     assert int(s["mood"]) == 66
+    assert s["condition"] == "rain"                # and the reading is now kept
     assert s["last_quote"] == "It rains in Lisbon, just like in my soul."
     assert quote == s["last_quote"]
     assert pet.get_history() == [s["last_quote"]]
@@ -1722,6 +1729,296 @@ def test_a_dead_market_is_reported_as_unknown_not_stale(direct_vm, direct_deploy
     direct_vm.mock_llm(r".*", json.dumps({"quote": "Silence.", "mood_delta": 0}))
     pet.check()
     assert pet.get_state()["market"] == "unknown"
+
+# --------------------------------------------------------------------------- #
+# The world hangover
+#
+# The weather used to exist only inside the check() that paid for it: one shock,
+# and the next action was back in a vacuum. Now the last COARSENED reading is
+# kept and spent an hour at a time by _decay, until WORLD_STALE_H.
+#
+# There is still exactly ONE web fetch in the contract and it is still only in
+# check(). Every test below proves that by deleting the web mocks after the
+# check and never putting them back — a decay or a prompt that went to the
+# network would not merely read a wrong number here, it would fail outright.
+#
+# CODE 61 is rain, code 0 is clear, code 3 is cloudy (see _wmo_condition), and
+# 18.0 C bands as "cool" (see _temp_band).
+# --------------------------------------------------------------------------- #
+
+RAIN, CLEAR, CLOUDY = 61, 0, 3
+
+
+def _checked_world(direct_vm, direct_deploy, code=CLEAR, temp=18.0,
+                   prices=(), quote="Seen."):
+    """A pet that looked outside at hour 0, with that reading stamped in storage.
+
+    Idle 0 at the check, deliberately. Every test below measures hours billed
+    AFTER the world was written, and a check that billed idle hours of its own
+    would mix the two halves of the mechanic into one number.
+
+    Mocks are cleared on the way out and only the LLM goes back — see the block
+    comment above for why that is an assertion and not housekeeping.
+    """
+    warp_hours(direct_vm, 0)
+    _mock_weather(direct_vm, code=code, temp=temp)
+    for date, amount in prices:
+        _mock_price(direct_vm, date, amount)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": quote, "mood_delta": 0}))
+    pet = direct_deploy(CONTRACT, *CTOR)
+    pet.check()
+    direct_vm.clear_mocks()
+    direct_vm.mock_llm(r".*", json.dumps({"quote": quote, "mood_delta": 0}))
+    return pet
+
+
+def test_rainy_hangover_starts_on_the_next_write_not_the_check(direct_vm, direct_deploy):
+    """A check() never charges its own idle hours for the weather it just read.
+
+    Those hours were lived through before anybody looked outside. Taxing them
+    would mean the hangover reaching backwards in time, and it would also make
+    check() quietly the most expensive action in the game for anyone who had
+    been away — exactly the player it is supposed to reward for coming back.
+    """
+    warp_hours(direct_vm, 0)
+    _mock_weather(direct_vm, code=RAIN)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Wet.", "mood_delta": 0}))
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    warp_hours(direct_vm, 10)
+    pet.check()
+    s = pet.get_state()
+    assert s["condition"] == "rain"
+    # 10 egg hours billed before the fetch, at the base rate: 70 - 10 = 60.
+    # Then the shock of looking out: -3. Had this check taxed its own idle hours
+    # with the rain it was about to read, the answer would be 70 - 20 - 3 = 47.
+    assert int(s["mood"]) == 57
+    assert int(s["satiety"]) == 60                 # egg hunger, 1/h
+
+    warp_hours(direct_vm, 12)
+    pet.pet()
+    # ...and from the next write on it does: two wet hours cost 4, not 2.
+    assert int(pet.get_state()["mood"]) == 55      # 57 - 2*(1+1) + PET_MOOD
+
+
+def test_hangover_after_check_warp_1h_applies(direct_vm, direct_deploy):
+    """One idle hour under the rain the pet was told about costs 2 mood, not 1."""
+    pet = _checked_world(direct_vm, direct_deploy, code=RAIN)
+    assert int(pet.get_state()["mood"]) == 67      # 70 - 3, no idle hours billed
+
+    warp_hours(direct_vm, 1)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["satiety"]) == 69                 # an hour really was billed
+    # 67 - (MOOD_PER_HOUR + WET_MOOD_EXTRA) + PET_MOOD. A dry hour would have
+    # cost 1 and left 68; the two 2s cancelling is a coincidence of this warp.
+    assert int(s["mood"]) == 67
+
+
+def test_hangover_after_check_warp_47h_applies(direct_vm, direct_deploy):
+    """Still inside the window with an hour to spare, and clear skies show it.
+
+    The long-warp boundary tests use a CLEAR sky rather than rain on purpose. A
+    wet hangover drains 2 mood an hour and floors at 0 somewhere around hour 34,
+    which erases the very boundary these tests exist to pin. Under a clear sky a
+    fresh hour costs CLEAR_MOOD_DRAIN (0) and a stale one costs MOOD_PER_HOUR
+    (1), so the answer is a single point and it cannot be confused with drift.
+    """
+    pet = _checked_world(direct_vm, direct_deploy, code=CLEAR)
+    assert int(pet.get_state()["mood"]) == 73      # 70 + 3, no idle hours billed
+
+    warp_hours(direct_vm, 47)
+    pet.pet()
+    s = pet.get_state()
+    assert s["alive"] is True
+    # Two days of neglect under a clear sky costs no mood at all — every one of
+    # the 47 hours was fresh. Without the hangover they would have cost 47.
+    assert int(s["mood"]) == 75                    # 73 - 0 + PET_MOOD
+
+
+def test_hangover_after_check_warp_48h_applies(direct_vm, direct_deploy):
+    """The last hour STARTS at 47 h, so it is still inside the window.
+
+    The window is measured from the start of each billed hour, not its end. An
+    hour that begins one second inside the window is a fresh hour; the reading
+    only stops counting for hours that begin after it has expired.
+    """
+    pet = _checked_world(direct_vm, direct_deploy, code=CLEAR)
+    warp_hours(direct_vm, WORLD_STALE_H)
+    pet.pet()
+    s = pet.get_state()
+    assert s["alive"] is True
+    assert int(s["mood"]) == 75                    # 73 - 0 + PET_MOOD, nothing stale yet
+
+
+def test_hangover_after_check_warp_49h_last_hour_is_stale(direct_vm, direct_deploy):
+    """And the hour that starts exactly AT 48 h is the first one that is not.
+
+    One point of difference from the 48 h case, which is the whole boundary: a
+    reading nobody has refreshed for two days stops moving the mood, so an
+    abandoned pet is not taxed forever by one unlucky look out of the window.
+    """
+    pet = _checked_world(direct_vm, direct_deploy, code=CLEAR)
+    warp_hours(direct_vm, WORLD_STALE_H + 1)
+    pet.pet()
+    s = pet.get_state()
+    assert s["alive"] is True
+    assert int(s["mood"]) == 74                    # 73 - MOOD_PER_HOUR + PET_MOOD
+
+
+def test_hangover_with_30min_leftover_on_check_does_not_tax_the_pre_check_hour(
+    direct_vm, direct_deploy
+):
+    """The off-by-one a coarse `elapsed // 3600` comparison cannot avoid.
+
+    The check lands half an hour into an hour that the decay cursor has not
+    billed yet. When that hour is finally billed it spans [0 h, 1 h] and the
+    check happened at 0.5 h — so it began before the rain was read and must be
+    charged the base rate. Comparing whole elapsed hours instead would call it
+    fresh and charge 2, which is the hangover reaching backwards in time.
+    """
+    warp_hours(direct_vm, 0)
+    _mock_weather(direct_vm, code=RAIN)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Wet.", "mood_delta": 0}))
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    warp_hours(direct_vm, 0.5)
+    pet.check()                                    # idle 0: the cursor does not move
+    assert int(pet.get_state()["mood"]) == 67      # 70 - 3
+
+    warp_hours(direct_vm, 1.5)
+    pet.pet()                                      # bills [0 h, 1 h], keeps 30 min
+    s = pet.get_state()
+    assert int(s["satiety"]) == 69                 # exactly one hour billed
+    assert int(s["mood"]) == 68                    # 67 - MOOD_PER_HOUR + PET_MOOD
+
+    warp_hours(direct_vm, 3.5)
+    pet.pet()                                      # bills [1 h, 2 h] and [2 h, 3 h]
+    s = pet.get_state()
+    assert int(s["satiety"]) == 67
+    # Both of these hours STARTED after the check, so both are wet: 2 each.
+    assert int(s["mood"]) == 66                    # 68 - 4 + PET_MOOD
+
+
+def test_last_world_ts_zero_means_no_hangover(direct_vm, direct_deploy):
+    """A pet nobody has ever checked drifts at the plain rate, in no weather.
+
+    The timestamp is what says "never", not the condition: an empty condition
+    string is also what a check() that came back with nothing would write, and
+    those two must not be the same state.
+    """
+    warp_hours(direct_vm, 0)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "No news.", "mood_delta": 0}))
+    pet = direct_deploy(CONTRACT, *CTOR)
+    s = pet.get_state()
+    assert int(s["last_world_ts"]) == 0
+    assert s["condition"] == "" and s["temp"] == ""
+
+    warp_hours(direct_vm, 5)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["mood"]) == 67                    # 70 - 5*MOOD_PER_HOUR + PET_MOOD
+    assert int(s["last_world_ts"]) == 0            # and a write does not invent one
+
+
+def test_stale_surging_does_not_regenerate_mood(direct_vm, direct_deploy):
+    """Good news makes a bad hour easier. It never hands mood back.
+
+    A clear sky drains 0 and a surging market takes another point off that, so
+    the arithmetic wants to go negative — and _decay subtracts the result from
+    the mood. Without the floor an abandoned pet under a good sky would drift UP
+    to 100 while nobody visited, which is the exact opposite of what an hourly
+    decay is for. Worse, the loop's own mood value is written back with u256()
+    and not _clamp, so a negative drain would climb straight past 100.
+    """
+    pet = _checked_world(
+        direct_vm, direct_deploy, code=CLEAR,
+        prices=((YESTERDAY, 1100), (DAY_BEFORE, 1000)),        # +10% -> surging
+    )
+    s = pet.get_state()
+    assert s["market"] == "surging"
+    assert int(s["mood"]) == 76                    # 70 + 3 clear + 3 surging
+
+    warp_hours(direct_vm, 47)
+    pet.pet()
+    # 47 fresh hours of clear-and-surging: drain 0 - 1, floored at 0. Not +47.
+    assert int(pet.get_state()["mood"]) == 78      # 76 + PET_MOOD
+
+    warp_hours(direct_vm, 60)
+    pet.pet()
+    # Hour 48 still starts inside the window (drain 0); hours 49..60 are stale
+    # and cost MOOD_PER_HOUR each, because a stale surge is not good news either.
+    assert int(pet.get_state()["mood"]) == 68      # 78 - 12 + PET_MOOD
+
+
+def test_decay_does_not_fetch_the_web(direct_vm, direct_deploy):
+    """The whole design in one test: a persisted world costs no second fetch.
+
+    Not a single web mock is installed for the pet() below. If _decay, _snapshot
+    or _build_prompt ever went back to the network for the weather they show and
+    charge for, this call would fail — and on chain it would be a second
+    non-deterministic block on someone else's gas, in an action that never asked
+    for one.
+    """
+    pet = _checked_world(direct_vm, direct_deploy, code=RAIN)
+    warp_hours(direct_vm, 5)
+    assert pet.pet() == "Seen."                    # LLM only; no mock_web at all
+    s = pet.get_state()
+    assert s["condition"] == "rain"                # still the reading check() took
+    assert int(s["mood"]) == 59                    # 67 - 5*(1+1) + PET_MOOD
+
+
+def test_freezing_does_not_chip_health_every_idle_hour(direct_vm, direct_deploy):
+    """Cold is one-shot and stays one-shot. last_temp is display, not a rate.
+
+    Health is the meter that barely heals, so an hourly cold chip would make a
+    winter city a death sentence rather than a hard place to live — and it would
+    do it to a pet whose owner did nothing wrong except call check() in January.
+    The hangover is condition and market only.
+    """
+    pet = _checked_world(direct_vm, direct_deploy, code=CLOUDY, temp=-5.0)
+    s = pet.get_state()
+    assert s["temp"] == "freezing" and s["condition"] == "cloudy"
+    assert int(s["health"]) == 99                  # one chip, for the look outside
+    assert int(s["mood"]) == 70                    # cloudy moves nothing on its own
+
+    warp_hours(direct_vm, 10)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["health"]) == 99                  # ten freezing idle hours, still one chip
+    assert int(s["mood"]) == 62                    # cloudy drains the base rate: 70 - 10 + 2
+
+
+def test_every_speak_prompt_contains_last_world_or_stale(direct_vm, direct_deploy):
+    """Every action speaks under the last world, and is told when it is old.
+
+    A pet that mentioned the rain only when somebody paid for check() and talked
+    like it lived in a featureless room the rest of the time was the tell that
+    the world was decoration. The stale flag is a label and not a filter: "I
+    have not looked outside in days" is a thing worth saying, and silence is not.
+
+    Both mocks below match on the prompt TEXT, so they only answer if the world
+    really reached the [DATA] block — with the exact ending that says it was
+    fresh, and then with the marker that says it was not.
+    """
+    pet = _checked_world(direct_vm, direct_deploy, code=RAIN)
+
+    direct_vm.clear_mocks()
+    direct_vm.mock_llm(
+        r"weather outside: rain, temperature: cool; crypto market yesterday: unknown;\n",
+        json.dumps({"quote": "FRESH WORLD", "mood_delta": 0}),
+    )
+    warp_hours(direct_vm, 1)
+    assert pet.pet() == "FRESH WORLD"              # pet(), which fetches nothing
+
+    direct_vm.clear_mocks()
+    direct_vm.mock_llm(
+        r"weather outside: rain.*\(this reading is stale",
+        json.dumps({"quote": "STALE WORLD", "mood_delta": 0}),
+    )
+    warp_hours(direct_vm, WORLD_STALE_H + 12)
+    assert pet.pet() == "STALE WORLD"
+    assert pet.get_state()["alive"] is True
 
 
 # --------------------------------------------------------------------------- #

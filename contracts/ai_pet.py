@@ -128,6 +128,29 @@ MARKET_BANDS = (
 )
 MARKET_MOOD = {"surging": 3, "rising": 1, "calm": 0, "sliding": -1, "crashing": -3}
 
+# --- the world outside, and how long it lingers ---------------------------- #
+# The weather used to be a one-shot shock that existed only inside check(): it
+# moved the mood once, for whoever paid the gas, and the very next action was
+# back in a vacuum. A player who never called check() was neither punished by a
+# week of rain nor rewarded by a clear sky — the "living world" was flavour text
+# with a price tag.
+#
+# So the last COARSENED reading is now kept, and it colours the hourly mood
+# drain until it goes stale. That is deliberately not the same thing as reading
+# the weather more often: there is still exactly one web fetch in this contract,
+# still only inside check(). What persists is a category the contract already
+# agreed on, spent slowly rather than all at once.
+#
+# WET_CONDITIONS is the tuple _apply_world's one-shot already tested against,
+# named rather than repeated: a hangover that disagreed with the shock about
+# what counts as bad weather would be a bug nobody could see from either side.
+WET_CONDITIONS = ("rain", "snow", "thunderstorm", "drizzle")
+WORLD_STALE_H = 48          # after this the last reading stops moving anything
+WET_MOOD_EXTRA = 1          # a wet hour costs this much mood ON TOP of the base
+CLEAR_MOOD_DRAIN = 0        # a clear hour costs this in TOTAL, not as a delta
+CRASH_MOOD_EXTRA = 1        # a crashing market is the pet's other bad weather
+SURGE_MOOD_RELIEF = 1       # and a surging one takes the edge off, never more
+
 # Life stages by age in days. Ordered oldest-first so the lookup returns the
 # first threshold the pet has already passed.
 LIFE_STAGES = (
@@ -373,6 +396,78 @@ def _age_days_at_billed_hour(age_secs: int, idle_h: int, billed: int, leftover: 
     return age // 86400 if age > 0 else 0
 
 
+def _billed_hour_end_age_s(age_secs: int, idle_h: int, billed: int, leftover: int) -> int:
+    """Virtual seconds from a stamp to the END of billed hour `billed`.
+
+    Same leftover-cursor arithmetic as _age_days_at_billed_hour, one hour later:
+    at the end of hour `billed` there were still (idle_h - 1 - billed) whole
+    hours to come plus the unbilled `leftover`. `age_secs` is passed in for the
+    reason given there — this runs once per billed hour and must not read
+    storage.
+    """
+    return age_secs - leftover - (idle_h - 1 - billed) * 3600
+
+
+def _world_is_fresh(world_age_secs: int, idle_h: int, billed: int, leftover: int) -> bool:
+    """Is billed hour `billed` inside the window the last check() lit up?
+
+    Two boundaries, and each one is a bug that was cheaper to reason about than
+    to find later.
+
+    The upper one is WORLD_STALE_H: a reading that nobody has refreshed for two
+    days stops moving the mood. Without it, one unlucky check() in a downpour
+    would tax an abandoned pet forever, and the only cure would be paying for
+    another check() in better weather.
+
+    The lower one is 0, and it is the whole reason this compares hour STAMPS
+    instead of a coarse `elapsed // 3600`. Hours are billed from the decay
+    cursor, which sits wherever the last action left it — so the first hour of
+    the bill after a check() routinely STARTED before that check ran. Charging
+    it for weather that had not been read yet would mean the hangover reaching
+    backwards in time, which is exactly what the coarse form did whenever
+    leftover + idle_h crossed the boundary.
+
+    `world_age_secs` is negative when there is no stamped world at all: a world
+    read this very second also measures 0, so the two cases cannot be told apart
+    by the age alone.
+    """
+    if world_age_secs < 0:
+        return False
+    start_age = _billed_hour_end_age_s(world_age_secs, idle_h, billed, leftover) - 3600
+    return 0 <= start_age < WORLD_STALE_H * 3600
+
+
+def _mood_drain_per_hour(fresh: bool, condition: str, market: str) -> int:
+    """Mood lost during one billed hour, given the world it was billed under.
+
+    While the last reading is fresh:
+
+        condition \\ market   calm/rising/unknown   surging   crashing
+        clear                          0              0          1
+        cloudy / fog / unknown         1              0          2
+        wet                            2              1          3
+
+    Two things this must never do. It must never return a negative number: a
+    surging market makes a bad hour easier to sit through, it does not hand back
+    mood the pet already lost, and an hourly loop that can add would let a
+    neglected pet drift UP to 100 while nobody visits. And an unknown condition
+    must cost exactly the base rate — a failed check() writes "unknown", and a
+    reading nobody could take is not the same thing as good news.
+    """
+    drain = MOOD_PER_HOUR
+    if not fresh:
+        return drain
+    if condition in WET_CONDITIONS:
+        drain += WET_MOOD_EXTRA
+    elif condition == "clear":
+        drain = CLEAR_MOOD_DRAIN
+    if market == "crashing":
+        drain += CRASH_MOOD_EXTRA
+    elif market == "surging":
+        drain -= SURGE_MOOD_RELIEF
+    return drain if drain > 0 else 0
+
+
 def _character_phrase(levels: list) -> str:
     """Render acquired traits into one sentence fragment, or "" for a blank slate.
 
@@ -569,11 +664,21 @@ def _build_prompt(
             f"answer {guest} in your reply"
         )
     facts = []
+    if world is None:
+        # Nobody fetched anything for this action — which is every action except
+        # check(). The world it speaks under is the one already in storage, put
+        # there by the last check() and carried in the snapshot. `stale` is a
+        # label, not a filter: the pet is told the reading is old rather than
+        # told nothing, because "I have not looked outside in days" is a thing
+        # worth saying and silence is not.
+        world = snap.get("world")
     if world is not None:
+        stale = " (this reading is stale — nobody has looked outside in a while)"
         facts.append(
             f"weather outside: {world.get('condition', 'unknown')}, "
             f"temperature: {world.get('temp', 'unknown')}; "
             f"crypto market yesterday: {world.get('market', 'unknown')};"
+            f"{stale if world.get('stale') else ''}"
         )
     if foreign:
         facts.append(foreign)
@@ -665,6 +770,10 @@ class AiPet(gl.Contract):
     evolving: bool                 # owner's switch: may experience change it?
     # --- health regen (see _decay) ---
     health_regen_acc: u256         # well-fed billed hours banked toward +1 health
+    # --- the world outside (see _apply_world / _mood_drain_per_hour) ---
+    last_condition: str            # last coarsened weather category check() saw
+    last_temp: str                 # last coarsened temperature band — display only
+    last_world_ts: u256            # real ts of that reading (0 = never looked out)
 
     # ---- constructor (private, no decorator) ----
     def __init__(self, name: str, persona: str, city: str, time_scale: int = 1,
@@ -691,6 +800,12 @@ class AiPet(gl.Contract):
             raise gl.vm.UserError("time_scale must be at least 1")
         self.time_scale = u256(scale)
         self.last_market = ""
+        # No world has been read yet, and the timestamp is what says so: an empty
+        # condition would be indistinguishable from a check() that came back
+        # blank, and _world_is_fresh has to be able to tell those apart.
+        self.last_condition = ""
+        self.last_temp = ""
+        self.last_world_ts = u256(0)
         self.owner = Address(owner) if owner else gl.message.sender_address
         self.name = name
         self.persona = persona
@@ -774,6 +889,15 @@ class AiPet(gl.Contract):
         was an egg and kitten-priced once it was a kitten; settling the whole
         absence at today's rate would make the pet's own birthday a thing worth
         timing your neglect around.
+
+        The same is true of the weather. Each hour's MOOD drain is billed under
+        the last world check() read, for as long as that reading is fresh — see
+        _mood_drain_per_hour. THERE IS STILL NO WEB CALL HERE: what the loop
+        reads is a category already agreed on by consensus and written to
+        storage, which is the only way a persistent world is affordable at all.
+        An hour that started before that reading was taken is billed at the base
+        rate, so the very check() that writes the world never charges its own
+        idle hours for it — the hangover starts with the next write.
         """
         cursor = int(self.last_interaction_ts)
         elapsed = self._elapsed(cursor)
@@ -812,6 +936,14 @@ class AiPet(gl.Contract):
         health = int(self.health)
         acc = int(self.health_regen_acc)
         age_secs = self._elapsed(int(self.birth_ts))
+        # The world, hoisted for the same reason: the hangover needs three fields
+        # and an elapsed time on every one of up to DECAY_BILL_CAP iterations,
+        # and reading them per hour is the gas profile this loop exists to avoid.
+        # -1 for "no world has ever been read" — see _world_is_fresh.
+        world_ts = int(self.last_world_ts)
+        world_age = self._elapsed(world_ts) if world_ts else -1
+        cond = str(self.last_condition)
+        market = str(self.last_market)
 
         for billed in range(idle_h):
             if health == 0:
@@ -842,7 +974,12 @@ class AiPet(gl.Contract):
             sat -= STAGE_SATIETY_PER_HOUR[stage]
             if sat < 0:
                 sat = 0
-            mood -= MOOD_PER_HOUR
+            # Mood is billed under the weather this hour was actually lived in.
+            # No web call happens here or anywhere near here — this is the last
+            # category check() agreed on, being spent slowly.
+            mood -= _mood_drain_per_hour(
+                _world_is_fresh(world_age, idle_h, billed, leftover), cond, market
+            )
             if mood < 0:
                 mood = 0
 
@@ -932,9 +1069,35 @@ class AiPet(gl.Contract):
     def _age_days(self) -> int:
         return self._elapsed(int(self.birth_ts)) // 86400
 
+    def _last_world(self):
+        """The last coarsened world as prompt data, or None if none was ever read.
+
+        NO WEB CALL. This is storage, written by the last check(), and it is what
+        lets every other action put the world in its prompt: a pet that mentioned
+        the rain only when someone paid for check() and then talked as if it
+        lived in a featureless room was the tell that the world was decoration.
+
+        A stale reading is still shown, flagged. Hiding it would make the pet's
+        world blink out at hour 48 with nothing to say about it, while the flag
+        lets the model do the obvious human thing and mention that it has not
+        looked outside in days.
+        """
+        ts = int(self.last_world_ts)
+        if ts == 0:
+            return None
+        return {
+            "condition": str(self.last_condition),
+            "temp": str(self.last_temp),
+            "market": str(self.last_market),
+            "stale": self._elapsed(ts) >= WORLD_STALE_H * 3600,
+        }
+
     def _snapshot(self, idle_hours: int) -> dict:
         """Flat state snapshot for prompt building (ordinary code, not non-det)."""
         return {
+            # the world every action speaks under — check() overrides it with the
+            # reading it has just taken, everyone else talks about that one
+            "world": self._last_world(),
             "name": str(self.name),
             "persona": str(self.persona),
             "satiety": int(self.satiety),
@@ -1139,18 +1302,37 @@ class AiPet(gl.Contract):
         return quote
 
     def _apply_world(self, world: dict) -> None:
-        """Real weather's effect on wellbeing (deterministic)."""
-        cond = world.get("condition", "")
-        if cond in ("rain", "snow", "thunderstorm", "drizzle"):
+        """Real weather's effect on wellbeing, plus the stamp the hangover runs on.
+
+        The one-shot numbers are exactly what they always were — this is the
+        shock of looking outside, and it is charged once, to whoever paid for the
+        look. What is new is the second half: the reading is kept, and _decay
+        spends it an hour at a time until WORLD_STALE_H (see there).
+
+        The stamp is written even when the reading came back "unknown", and that
+        matters more than it looks. A failed check() that left the previous
+        reading in place would keep last week's downpour alive indefinitely, so
+        the cheapest way to keep a bad hangover running would be to make sure
+        every later check() failed. Writing "unknown" ends the hangover instead.
+        """
+        cond = str(world.get("condition", "unknown"))
+        if cond in WET_CONDITIONS:
             self.mood = _clamp(int(self.mood) - 3)
         elif cond == "clear":
             self.mood = _clamp(int(self.mood) + 3)
-        if world.get("temp") == "freezing":
+        temp = str(world.get("temp", "unknown"))
+        # Cold is one-shot and stays one-shot: it is the only reading that costs
+        # HEALTH, and health is the meter that barely heals. An hourly cold chip
+        # would make a winter city a death sentence rather than a hard place.
+        if temp == "freezing":
             self.health = _clamp(int(self.health) - 1)
         # the crypto market is this pet's other weather
         market = str(world.get("market", "unknown"))
         self.mood = _clamp(int(self.mood) + MARKET_MOOD.get(market, 0))
         self.last_market = market
+        self.last_condition = cond
+        self.last_temp = temp
+        self.last_world_ts = u256(_now())
 
     # ===================== write methods ====================================
 
@@ -1575,6 +1757,15 @@ class AiPet(gl.Contract):
             "time_scale": int(self.time_scale),
             # last ETH move check() saw, as a category — never a raw price
             "market": str(self.last_market),
+            # ... and the rest of that same reading. Coarse categories only, for
+            # the same reason the market is: raw text from the web never leaves
+            # the consensus block. The TIMESTAMP is published rather than a
+            # precomputed age in hours, because an age would be stale the moment
+            # it was read and a client that wants one can subtract — the whole
+            # point of a view is that it does not have to guess when it was asked.
+            "condition": str(self.last_condition),
+            "temp": str(self.last_temp),
+            "last_world_ts": int(self.last_world_ts),
             # what living has added to the persona, rendered from counters
             "character": self._character(),
             # well-fed hours banked toward the next point of health, so a client
