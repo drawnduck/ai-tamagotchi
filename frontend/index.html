@@ -1230,8 +1230,9 @@
                  disagree. A "yours to take" of zero next to a balance that is
                  plainly not zero reads as a broken till unless it says why. -->
             <p class="hint" id="tillNote" hidden></p>
-            <p class="hint">1 GEN stays as revive reserve; a till-revive locks it away for good,
-              then the till needs new food. The payout settles when the transaction
+            <p class="hint">Once the pet has been fed a revive's worth in its life, 1 GEN stays
+              back as the revive reserve; a till-revive locks that GEN away for good, and the
+              till then needs new food before it can cover another death. The payout settles when the transaction
               <b>finalizes</b> — about half an hour on Bradbury. The balance stays put until then.</p>
           </div>
         </div>
@@ -2039,6 +2040,12 @@ function drawStats() {
   text("mood", 2, 24); bar(32, 24, 62, Number(pet?.mood ?? 0));
   text("well", 2, 33); bar(32, 33, 62, Number(pet?.health ?? 0));
   text(`${pet?.stage ?? "-"} ${Number(pet?.age_days ?? 0)}d`, 2, 43);
+  // Well-fed hours banked toward the next point of health. Published so a client
+  // can say "healing" honestly instead of inferring it from a meter that has not
+  // moved yet. `?? 0` is the old-pet path: a pet deployed before the regen
+  // contract has no such key, and reads as nothing banked.
+  const mending = Number(pet?.health_regen_acc ?? 0);
+  if (mending > 0) text(`mend ${mending}`, 58, 43);
   // the world as the contract reports it: coarse categories, never a raw
   // reading or a price. `condition` only exists on a pet deployed with the
   // world-hangover contract — an older one has no such key and keeps showing
@@ -2111,11 +2118,28 @@ function drawConfirm() {
     textCentered("a size b yes", 52);
     return;
   }
-  const detail = m?.key === "visit" ? short(visitTarget || "0x0000000000")
-    : m?.key === "revive"
-      ? (tillReady ? "from the till" : `${fromWei(reviveCost ?? 0n).toFixed(2)} gen`)
-      : "";
-  if (detail) textCentered(detail, 38);
+  // Two of the buttons do something a player cannot see from the icon, so the
+  // confirmation says it before the transaction is signed rather than after.
+  // pet() stops moving the meter at PET_MOOD_CAP (80 — the contract's number,
+  // not 70: HATCH_MOOD is 70, so a cap of 70 would make the very first press of
+  // a brand-new pet a mechanical no-op), and play() is the only route past it,
+  // which is exactly why it charges food. The model's own -3..+3 lands on top
+  // of both and is not capped, so a petted pet can still end up above 80.
+  // 15 characters per line — see CHARS_PER_LINE.
+  const NOTE = {
+    pet:  ["comfort cap 80", "model may +-3"],
+    play: ["past the cap", "costs food"],
+  };
+  const note = NOTE[m?.key];
+  if (note) {
+    note.forEach((line, i) => textCentered(line, 34 + i * 8));
+  } else {
+    const detail = m?.key === "visit" ? short(visitTarget || "0x0000000000")
+      : m?.key === "revive"
+        ? (tillReady ? "from the till" : `${fromWei(reviveCost ?? 0n).toFixed(2)} gen`)
+        : "";
+    if (detail) textCentered(detail, 38);
+  }
   textCentered("b = yes  c = no", 50);
 }
 
@@ -2275,7 +2299,12 @@ function setBusy(b) {
   $("connectWallet").disabled = b;
   $("hatch").disabled = b || !signerAddress;
   $("useKey").disabled = b;
-  $("withdraw").disabled = b || !client || !isOwner;
+  // ...and nothing to take is a button that should not be pressable. The amount
+  // field kept its 0.1 default whatever the reserve said, so an owner of a fed
+  // pet holding less than 1 GEN could always fire a transaction the contract was
+  // certain to refuse — a wallet signature and a consensus round-trip to learn
+  // what the note above the button already says in words.
+  $("withdraw").disabled = b || !client || !isOwner || withdrawable === 0n;
   $("freeze").disabled = b || !client || !isOwner;
   $("forget").disabled = b || !client || !isOwner;
   $("charControls").hidden = !isOwner;
@@ -2805,7 +2834,11 @@ async function loadState(opts = {}) {
     $("charControls").hidden = !isOwner;
     $("balMeta").textContent = fromWei(bal).toFixed(3) + " GEN";
     $("wdMeta").textContent = fromWei(withdrawable).toFixed(3) + " GEN";
-    $("wdAmt").max = fromWei(withdrawable).toFixed(4);
+    // `max` is advisory for a scripted read — the click handler reads .value —
+    // so the value itself is clamped down to what the contract will actually pay.
+    const most = fromWei(withdrawable).toFixed(4);
+    $("wdAmt").max = most;
+    if (toWei($("wdAmt").value) > withdrawable) $("wdAmt").value = most;
     // Why the two lines above can disagree. Three different reasons, and the
     // owner is owed the right one: the reserve is doing its job, the dust is
     // short of the reserve and waiting for food, or the till already spent it.
@@ -2882,6 +2915,22 @@ const TRAIT_NOTE = {
   proud:        "Tends to move when it is well kept: a full belly, a good mood, someone who visits.",
 };
 const DEPTH_WORD = ["", "a little", "a little", "noticeably", "noticeably", "deeply"];
+// The six traits are three opposing pairs, and a nudge toward one of a pair
+// spends itself LOWERING the other while the other is above zero — which is why
+// a trait can sit still through several nudges and why a pair never both stand.
+// Hardcoded so a pet deployed before get_character() published `opposites` still
+// explains itself; the contract's own list wins whenever it is there, so a
+// redeploy that changes the pairs does not leave this page quietly disagreeing.
+const TRAIT_OPPOSITES = [["curious", "wary"], ["playful", "gloomy"], ["affectionate", "proud"]];
+function oppositeOf(c, name) {
+  const pairs = Array.isArray(c?.opposites) ? c.opposites : TRAIT_OPPOSITES;
+  for (const pair of pairs) {
+    const a = String(pair?.[0] ?? ""), b = String(pair?.[1] ?? "");
+    if (a === name) return b;
+    if (b === name) return a;
+  }
+  return "";
+}
 
 let openTrait = null;
 
@@ -2954,7 +3003,23 @@ function drawTraitCard(c, max, isLead) {
         : level > 0
           ? `<p>Not in its voice yet: only the top two reach the prompt.</p>`
           : `<p>Never moved.</p>`)
+    + oppositeNote(c, name)
     + `<p><b>${escapeHtml(when)}</b></p>`;
+}
+
+/** Why a nudge toward this trait might lower a different one instead. */
+function oppositeNote(c, name) {
+  const opp = oppositeOf(c, name);
+  if (!opp) return "";
+  const row = (c.traits || []).find(x => String(x.name) === opp);
+  const level = Number(row?.level) || 0;
+  const o = escapeHtml(opp), n = escapeHtml(name);
+  return level > 0
+    ? `<p>Opposite: <b>${o}</b>, standing at ${level}. A nudge toward ${n} spends `
+      + `itself taking ${o} down a point instead — crossing zero costs two nudges, `
+      + `and the pair can never both stand.</p>`
+    : `<p>Opposite: <b>${o}</b>, at zero — so a nudge toward ${n} raises ${n}. `
+      + `Once ${o} moves, nudges toward ${n} go on lowering it until it is spent.</p>`;
 }
 
 // One listener on the list, so re-rendering the rows never leaks handlers.
