@@ -978,6 +978,24 @@
   .pet-chip.current span { color: var(--ink-dim); }
   .pet-chip--new { text-align: center; background: rgba(255,255,255,.3); }
   .pet-chip--new b { font-size: 12px; }
+  .pet-slot { position: relative; display: block; }
+  .pet-slot .pet-chip { padding-right: 18px; }
+  .pet-hide {
+    position: absolute; top: 3px; right: 3px; width: 14px; height: 14px;
+    display: grid; place-items: center; border: 0; border-radius: 50%;
+    cursor: pointer; background: transparent; color: var(--ink-faint);
+    font-family: var(--mono); font-size: 10px; line-height: 1; opacity: 0;
+    transition: opacity .12s ease, color .12s ease;
+  }
+  .pet-slot:hover .pet-hide, .pet-hide:focus-visible { opacity: 1; }
+  .pet-hide:hover { color: var(--ink); }
+  .pet-chip.ghost { opacity: .45; }
+  .pet-rail__hidden {
+    border: 0; background: transparent; cursor: pointer; padding: 2px 0;
+    font-family: var(--mono); font-size: 7px; font-weight: 700;
+    letter-spacing: .18em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .pet-rail__hidden:hover { color: var(--ink); }
   @media (max-width: 940px) {
     /* off the device's flank, tucked above the status console */
     .pet-rail { right: 8px; top: auto; bottom: 76px; transform: none; width: 94px; max-height: 38vh; }
@@ -2722,10 +2740,39 @@ async function openPet(addr, { announce = false } = {}) {
 // stays on the shelf even when the explorer is unreachable.
 let myPets = [];
 
+// The first cut of the cache stored pets with no record of whether they were
+// alive when found, and the auto-hide below keys on exactly that. Drop it once
+// and let the chain sweep rebuild both stores with the fuller shape.
+if (!localStorage.getItem("aipet_shelf_v2")) {
+  try {
+    localStorage.removeItem("aipet_mine");
+    localStorage.removeItem("aipet_probe");
+    localStorage.setItem("aipet_shelf_v2", "1");
+  } catch {}
+}
+
 function mineAll() {
   try { return JSON.parse(localStorage.getItem("aipet_mine") || "{}"); }
   catch { return {}; }
 }
+
+// A hidden pet is still owned — the wallet's history cannot be edited — it is
+// just off the shelf. Kept per wallet, like aipet_mine. Pets discovered on the
+// chain ALREADY dead go here on arrival: a dead pet this browser never played
+// is nearly always an old experiment, and "N hidden" is one press away. A pet
+// that dies after it was found is never auto-hidden — that one needs reviving.
+function hiddenAll() {
+  try { return JSON.parse(localStorage.getItem("aipet_hide") || "{}"); }
+  catch { return {}; }
+}
+function hiddenSetFor(me) { return new Set(hiddenAll()[me] || []); }
+function setHidden(me, addr, on) {
+  const all = hiddenAll(), set = new Set(all[me] || []);
+  on ? set.add(addr.toLowerCase()) : set.delete(addr.toLowerCase());
+  all[me] = [...set];
+  try { localStorage.setItem("aipet_hide", JSON.stringify(all)); } catch {}
+}
+let showHidden = false;
 
 /** Record a pet as this wallet's. Cheap to call repeatedly — writes only on news. */
 function rememberPet(addr, name) {
@@ -2792,13 +2839,17 @@ async function walletPetsFromChain(me) {
   const res = await fetch(`${base}/v1/transactions?address=${me}&page=1&page_size=100`);
   const txs = (await res.json())?.transactions || [];
   const deploys = [];
+  const touched = new Map();   // addrLower -> when this wallet last sent it anything
   for (const t of txs) {
+    const ts = Number(t.submission_timestamp) || 0;
+    const to = String(t.to_address || "").toLowerCase();
+    if (to && ts > (touched.get(to) || 0)) touched.set(to, ts);
     if (!t?.data?.params?.encoded_data?.contract_code) continue;
     const addr = t.to_address;   // for a deploy row this is the created contract
     if (!/^0x[0-9a-fA-F]{40}$/.test(addr || "")) continue;
     if (String(t.from_address || "").toLowerCase() !== me) continue;
     if (!deploys.some(d => d.addr.toLowerCase() === addr.toLowerCase())) {
-      deploys.push({ addr, ts: Number(t.submission_timestamp) || 0 });
+      deploys.push({ addr, ts });
     }
   }
   const verdicts = probeVerdicts();
@@ -2816,7 +2867,7 @@ async function walletPetsFromChain(me) {
           client.readContract({ address: d.addr, functionName: "get_state", args: [] }),
         ]);
         v = String(owner).toLowerCase() === me && typeof s?.name === "string"
-          ? { name: String(s.name).slice(0, 24) } : null;
+          ? { name: String(s.name).slice(0, 24), alive: s.alive !== false } : null;
       } catch { v = null; }
       if (v || Date.now() / 1000 - d.ts > 600) {
         verdicts[key] = v;
@@ -2825,7 +2876,12 @@ async function walletPetsFromChain(me) {
     }
     // ts rides along even for cached verdicts: the shelf sorts by hatch time,
     // and probes discover older pets on later visits, so insertion order lies.
-    if (v) pets.push({ address: d.addr, name: v.name || "pet", ts: d.ts });
+    if (v) {
+      pets.push({
+        address: d.addr, name: v.name || "pet", ts: d.ts,
+        alive: v.alive !== false, seen: touched.get(key) || d.ts,
+      });
+    }
   }
   return pets;
 }
@@ -2849,7 +2905,15 @@ async function refreshMyPets({ autoOpen = false, switched = false } = {}) {
     if (known) {
       if (r.name && (!known.name || known.name === "pet")) known.name = r.name;
       if (r.ts && !known.ts) known.ts = r.ts;
-    } else merged.set(key, { address: r.address, name: r.name || "pet", ts: r.ts });
+    } else {
+      merged.set(key, { address: r.address, name: r.name || "pet", ts: r.ts });
+      // Debris check, applied only to pets this browser has never played:
+      // dead on first sight, or untouched by its own wallet for over a week.
+      // The stored `alive` flag alone cannot carry this — a pet only dies when
+      // a write bills the decay, so an abandoned pet reads alive forever.
+      const stale = r.seen && Date.now() / 1000 - r.seen > 7 * 86400;
+      if (r.alive === false || stale) setHidden(me, key, true);
+    }
   }
   // Hatch order, oldest first: "the last pet on the shelf" — what Welcome back
   // opens — must mean the newest pet, and probes find OLDER pets on later
@@ -2862,13 +2926,17 @@ async function refreshMyPets({ autoOpen = false, switched = false } = {}) {
     localStorage.setItem("aipet_mine", JSON.stringify(all));
   } catch { /* storage refused — the shelf still works for this session */ }
   renderPetRail();
+  // Auto-opening considers only what is ON the shelf; hidden pets are owned
+  // but resting, and nobody should be greeted with one.
+  const hidden = hiddenSetFor(me);
+  const visible = myPets.filter(p => !hidden.has(p.address.toLowerCase()));
   // A returning player should land on their pet, not on a form. Only when the
   // page is not already pointed anywhere — a shared link always wins.
-  if (autoOpen && !address && !$("addr").value.trim() && myPets.length) {
-    const last = myPets[myPets.length - 1];
+  if (autoOpen && !address && !$("addr").value.trim() && visible.length) {
+    const last = visible[visible.length - 1];
     await openPet(last.address);
     setStatus(`Welcome back — opened ${last.name} (${short(last.address)}).\n`
-      + (myPets.length > 1 ? "The shelf on the right switches between your pets." : ""), "ok");
+      + (visible.length > 1 ? "The shelf on the right switches between your pets." : ""), "ok");
     return;
   }
   // A DIFFERENT signer just took over. If it does not own the pet on screen,
@@ -2878,8 +2946,8 @@ async function refreshMyPets({ autoOpen = false, switched = false } = {}) {
   const ownsOpen = !!address && myPets.some(p => p.address.toLowerCase() === address.toLowerCase());
   if (switched && address && !ownsOpen
       && address.toLowerCase() !== linked.pet.toLowerCase()) {
-    if (myPets.length) {
-      const last = myPets[myPets.length - 1];
+    if (visible.length) {
+      const last = visible[visible.length - 1];
       const was = short(address);
       await openPet(last.address);
       setStatus(`${was} belongs to another wallet — opened your ${last.name} `
@@ -2898,15 +2966,32 @@ async function refreshMyPets({ autoOpen = false, switched = false } = {}) {
 function renderPetRail() {
   const rail = $("petRail");
   if (!signerAddress || !myPets.length) { rail.hidden = true; return; }
+  const me = signerAddress.toLowerCase();
+  const hidden = hiddenSetFor(me);
   const cur = (address || "").toLowerCase();
+  // The open pet always shows, hidden or not: a shelf that cannot point at
+  // what is on screen would be lying about where you are.
+  const isHidden = p => hidden.has(p.address.toLowerCase()) && p.address.toLowerCase() !== cur;
+  const shown = myPets.filter(p => !isHidden(p));
+  const ghosts = showHidden ? myPets.filter(isHidden) : [];
+  const hiddenCount = myPets.length - shown.length;
   rail.innerHTML = `<p class="pet-rail__label">my pets</p>`
-    + myPets.map(p => {
+    + shown.map(p => {
         const here = p.address.toLowerCase() === cur;
-        return `<button type="button" class="pet-chip${here ? " current" : ""}"`
+        return `<span class="pet-slot"><button type="button" class="pet-chip${here ? " current" : ""}"`
           + ` data-pet="${escapeHtml(p.address)}" title="${escapeHtml(p.address)}"`
           + (here ? ` aria-current="true"` : "")
-          + `><b>${escapeHtml(p.name || "pet")}</b><span>${escapeHtml(short(p.address))}</span></button>`;
+          + `><b>${escapeHtml(p.name || "pet")}</b><span>${escapeHtml(short(p.address))}</span></button>`
+          + (here ? "" : `<button type="button" class="pet-hide" data-hide="${escapeHtml(p.address)}"`
+            + ` title="hide from the shelf" aria-label="hide ${escapeHtml(p.name || "pet")}">×</button>`)
+          + `</span>`;
       }).join("")
+    + ghosts.map(p =>
+        `<button type="button" class="pet-chip ghost" data-restore="${escapeHtml(p.address)}"`
+        + ` title="return this pet to the shelf"`
+        + `><b>${escapeHtml(p.name || "pet")}</b><span>${escapeHtml(short(p.address))}</span></button>`).join("")
+    + (hiddenCount ? `<button type="button" class="pet-rail__hidden" data-toggle-hidden>`
+        + (showHidden ? "tuck away" : `${hiddenCount} hidden`) + `</button>` : "")
     + `<button type="button" class="pet-chip pet-chip--new" data-new-pet`
     + ` title="hatch another pet"><b>+</b><span>new pet</span></button>`;
   rail.hidden = false;
@@ -2915,6 +3000,10 @@ function renderPetRail() {
 $("petRail").addEventListener("click", async (e) => {
   const chip = e.target.closest("button");
   if (!chip || busy) return;
+  const me = (signerAddress || "").toLowerCase();
+  if (chip.hasAttribute("data-hide")) { setHidden(me, chip.dataset.hide, true); renderPetRail(); return; }
+  if (chip.hasAttribute("data-restore")) { setHidden(me, chip.dataset.restore, false); renderPetRail(); return; }
+  if (chip.hasAttribute("data-toggle-hidden")) { showHidden = !showHidden; renderPetRail(); return; }
   if (chip.hasAttribute("data-new-pet")) { activateRoute("new-pet"); return; }
   const addr = chip.dataset.pet;
   if (!addr || addr.toLowerCase() === (address || "").toLowerCase()) return;
