@@ -2415,6 +2415,11 @@ def _act(direct_vm, pet, trait=None, quote="hm"):
     return pet.pet()
 
 
+def _level(character, name):
+    """One counter out of a get_character() sheet, by trait name."""
+    return next(t["level"] for t in character["traits"] if t["name"] == name)
+
+
 def test_a_new_pet_has_no_acquired_character(direct_deploy):
     pet = direct_deploy(CONTRACT, *CTOR)
     assert pet.get_state()["character"] == ""
@@ -2504,8 +2509,329 @@ def test_the_two_strongest_traits_colour_the_pet(direct_vm, direct_deploy):
         warp_hours(direct_vm, i * 4)
         _act(direct_vm, pet, trait=trait)
 
-    # curious 2, playful 1, wary 1 -> strongest first, ties by TRAITS order
+    # The phrase is what it always was, but it is now reached a different way, so
+    # the counters are asserted too: `wary` is `curious`'s opposite, so the fourth
+    # nudge SPENT itself burning curious 2 -> 1 instead of raising wary 0 -> 1.
+    # curious 1, playful 1, wary 0 -> strongest first, ties by TRAITS order.
+    # Without the level assertions this test would keep passing while measuring
+    # the wrong mechanism entirely.
+    c = pet.get_character()
+    assert _level(c, "curious") == 1
+    assert _level(c, "playful") == 1
+    assert _level(c, "wary") == 0
     assert pet.get_state()["character"] == "a little curious and a little playful"
+
+
+# --------------------------------------------------------------------------- #
+# The pendulum: opposing traits
+#
+# Before this, every counter only ever rose. A pet that was curious in its first
+# week was curious forever, and "it got over that" was not a thing the mechanic
+# could say — the character was a pile of stickers, not a character.
+#
+# Now a nudge whose OPPOSITE is standing spends itself burning that opposite down
+# instead of stacking itself higher, so the two can never both be true of the same
+# pet at once. The cooldown is spent either way: working through some gloom is as
+# much a change as acquiring a trait, and must cost the same wait.
+# --------------------------------------------------------------------------- #
+
+
+def test_raising_a_trait_decrements_its_opposite(direct_vm, direct_deploy):
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    _act(direct_vm, pet, trait="curious")          # curious 1, wary 0
+    warp_hours(direct_vm, 4)                       # EVOLVE_COOLDOWN_H
+    _act(direct_vm, pet, trait="wary")             # wary is curious's opposite
+
+    c = pet.get_character()
+    assert _level(c, "curious") == 0               # burnt back down, not stacked
+    assert _level(c, "wary") == 0
+    assert c["evolutions"] == 2                    # the nudge still counted
+    assert pet.get_state()["character"] == ""      # and the pet is a blank slate again
+
+
+def test_decrementing_opposite_does_not_raise_the_requested_trait(direct_vm, direct_deploy):
+    """One nudge moves ONE counter. A pendulum that also pushed would be a ratchet."""
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    _act(direct_vm, pet, trait="curious")
+    warp_hours(direct_vm, 4)
+    _act(direct_vm, pet, trait="curious")          # curious 2
+    warp_hours(direct_vm, 8)
+    _act(direct_vm, pet, trait="wary")             # burns one off curious
+
+    c = pet.get_character()
+    assert _level(c, "curious") == 1
+    assert _level(c, "wary") == 0                  # NOT raised in the same nudge
+    assert c["evolutions"] == 3
+
+
+def test_the_opposite_only_rises_once_the_other_is_spent(direct_vm, direct_deploy):
+    """Two nudges to cross zero: one to stop being curious, one to become wary.
+
+    This is the whole shape of "it changed its mind" — it costs twice as long as
+    picking up a trait from nothing, which is the point.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    _act(direct_vm, pet, trait="curious")          # curious 1
+    warp_hours(direct_vm, 4)
+    _act(direct_vm, pet, trait="wary")             # curious 0, wary still 0
+    warp_hours(direct_vm, 8)
+    _act(direct_vm, pet, trait="wary")             # now there is nothing in the way
+
+    c = pet.get_character()
+    assert _level(c, "curious") == 0
+    assert _level(c, "wary") == 1
+    assert pet.get_state()["character"] == "a little wary"
+
+
+def test_burning_an_opposite_still_spends_the_cooldown(direct_vm, direct_deploy):
+    """Otherwise the down-swing would be free and a character could be flipped
+    in one afternoon of clicking, which is exactly what the cooldown exists to
+    stop for the up-swing."""
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    _act(direct_vm, pet, trait="playful")          # playful 1
+    warp_hours(direct_vm, 4)
+    _act(direct_vm, pet, trait="gloomy")           # burns playful 1 -> 0
+    assert pet.get_character()["evolutions"] == 2
+
+    _act(direct_vm, pet, trait="gloomy")           # same hour: refused
+    c = pet.get_character()
+    assert c["evolutions"] == 2
+    assert _level(c, "gloomy") == 0
+
+
+def test_a_maxed_trait_is_not_frozen_its_opposite_still_swings_it_back(direct_vm, direct_deploy):
+    """A ceiling is never a dead end: a deeply gloomy pet can still be cheered up.
+
+    The design doc words the rule as "TRAIT_MAX gates only the increment branch,
+    so a maxed playful can still burn down a deep gloomy". THAT state is
+    unreachable, and this test says so rather than pretending otherwise: the
+    pendulum's own invariant is that a pair never both stand (see
+    test_a_pair_never_both_stand), so "requested trait at TRAIT_MAX AND its
+    opposite above zero" cannot happen through any sequence of nudges. I confirmed
+    it by mutation: moving the TRAIT_MAX check back above the pendulum leaves the
+    whole suite green. The placement is defensive, not observable.
+
+    What IS reachable, and what a player actually feels, is asserted below: at the
+    ceiling the trait refuses to grow further and the refusal costs nothing, but
+    the OPPOSITE nudge still moves it — five nudges of gloom are not a life
+    sentence.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    for i in range(5):                             # five landings -> TRAIT_MAX
+        warp_hours(direct_vm, i * 4)
+        _act(direct_vm, pet, trait="gloomy")
+    assert pet.get_character()["phrase"] == "deeply gloomy"
+
+    warp_hours(direct_vm, 5 * 4)
+    _act(direct_vm, pet, trait="gloomy")           # at the ceiling, opposite is 0
+    c = pet.get_character()
+    assert _level(c, "gloomy") == 5                # the increment branch refuses
+    assert c["evolutions"] == 5                    # and the nudge cost nothing
+
+    warp_hours(direct_vm, 6 * 4)
+    _act(direct_vm, pet, trait="playful")          # the way back out
+    c = pet.get_character()
+    assert _level(c, "gloomy") == 4
+    assert _level(c, "playful") == 0
+    assert c["evolutions"] == 6
+
+
+def test_a_pair_never_both_stand(direct_vm, direct_deploy):
+    """THE invariant the whole mechanic rests on: at most one of a pair is above 0.
+
+    It is what makes the character a position rather than a history — a pet is
+    curious OR wary, never both at once — and it is also why TRAIT_MAX's placement
+    inside the increment branch cannot be observed from outside (see
+    test_a_maxed_trait_is_not_frozen_its_opposite_still_swings_it_back).
+
+    Walked over a plan that deliberately swings back and forth across both pairs,
+    checking after EVERY nudge rather than only at the end.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    plan = ["curious", "curious", "wary", "wary", "wary", "playful",
+            "gloomy", "gloomy", "curious", "playful"]
+    for i, trait in enumerate(plan):
+        warp_hours(direct_vm, i * 4)
+        _act(direct_vm, pet, trait=trait)
+        c = pet.get_character()
+        for a, b in (("curious", "wary"), ("playful", "gloomy"),
+                     ("affectionate", "proud")):
+            assert min(_level(c, a), _level(c, b)) == 0, (
+                f"{a} and {b} both stand after nudge {i} ({trait})"
+            )
+
+
+def test_the_two_pendulums_are_independent(direct_vm, direct_deploy):
+    """curious/wary and playful/gloomy share nothing — a pet can be both."""
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    _act(direct_vm, pet, trait="curious")
+    warp_hours(direct_vm, 4)
+    _act(direct_vm, pet, trait="playful")          # gloomy is 0, so this grows
+
+    c = pet.get_character()
+    assert _level(c, "curious") == 1
+    assert _level(c, "playful") == 1
+
+
+def test_the_doc_worked_example_walks_to_one_affectionate_and_one_gloomy(direct_vm, direct_deploy):
+    """The four-step example from the design doc, counter for counter.
+
+    The doc frames the steps as pet -> play -> check-in-rain -> check-in-rain,
+    which is where those trait words come FROM (see TRAIT_NUDGE, and the rain in
+    the [DATA] fence for the two gloomy ones). The pendulum itself does not care
+    which action carried the word, so the walk is done with the cheapest action
+    that has no stage gate and needs no web mock; what is asserted is the arc:
+    the third step does NOT make the pet gloomy, it only stops it being playful.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    plan = ["affectionate", "playful", "gloomy", "gloomy"]
+    for i, trait in enumerate(plan):
+        warp_hours(direct_vm, i * 4)
+        _act(direct_vm, pet, trait=trait)
+
+    c = pet.get_character()
+    assert [_level(c, n) for n in
+            ("curious", "affectionate", "playful", "wary", "gloomy", "proud")] == [
+        0, 1, 0, 0, 1, 0,
+    ]
+    assert c["evolutions"] == 4
+
+
+def test_a_trait_with_no_opposite_would_still_grow(direct_deploy):
+    """_opposite returns "" for an unpaired word, and TRAITS is allowed to grow.
+
+    Every trait shipped today HAS a pair — this asserts the table stays that way,
+    and that the unpaired path is a quiet "no pendulum" rather than a crash the
+    day somebody adds a seventh trait.
+    """
+    mod = _contract_module(direct_deploy)
+    for name in mod.TRAITS:
+        opp = mod._opposite(name)
+        assert opp in mod.TRAITS, f"{name} has no opposite"
+        assert opp != name
+        assert mod._opposite(opp) == name          # the table reads both ways
+    assert mod._opposite("banana") == ""
+    assert mod._opposite("") == ""
+
+
+def test_the_opposites_are_published_for_clients(direct_deploy):
+    """So a UI explaining "wary burns curious down" cannot drift from the contract."""
+    pet = direct_deploy(CONTRACT, *CTOR)
+    assert pet.get_character()["opposites"] == [
+        ["curious", "wary"], ["playful", "gloomy"], ["affectionate", "proud"],
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# The nudge: steering by asking, never by rejecting
+# --------------------------------------------------------------------------- #
+
+
+def test_prompt_suggests_affectionate_on_pet(direct_vm, direct_deploy):
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r"often makes you more affectionate", _reply(quote="WAS NUDGED"))
+    direct_vm.mock_llm(r".*", _reply(quote="NO NUDGE"))
+    assert pet.pet() == "WAS NUDGED"
+
+
+def test_the_nudge_is_phrased_as_an_invitation_not_an_order(direct_vm, direct_deploy):
+    """A prompt that ORDERS a trait turns the closed vocabulary into a rubber
+    stamp: the model would answer with the word it was told to answer with and
+    the character would just be a log of which buttons were pressed."""
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(
+        r"pick that, or another from the list, or an empty string",
+        _reply(quote="WAS ASKED"),
+    )
+    direct_vm.mock_llm(r".*", _reply(quote="WAS TOLD"))
+    assert pet.pet() == "WAS ASKED"
+
+
+def test_every_action_carries_its_own_nudge(direct_deploy):
+    """One assertion per row of TRAIT_NUDGE, without paying for five real actions.
+
+    _build_prompt is a module-level pure function precisely so this is possible:
+    the mapping is checked here, and that the mapping actually reaches a live
+    prompt is checked by test_prompt_suggests_affectionate_on_pet.
+    """
+    mod = _contract_module(direct_deploy)
+    snap = {
+        "world": None, "name": "Pixel", "persona": "a cat", "satiety": 70,
+        "mood": 70, "health": 100, "age_days": 0, "stage": "egg",
+        "idle_hours": 0, "character": "",
+    }
+    for action, trait in (("pet", "affectionate"), ("play", "playful"),
+                          ("feed", "proud"), ("visit", "curious"),
+                          ("check", "curious")):
+        prompt = mod._build_prompt(snap, None, "something happened", action=action)
+        assert f"often makes you more {trait} " in prompt
+        assert trait in mod.TRAITS               # the nudge stays inside the list
+
+    # revive() is deliberately absent from the table: a pet coming back from the
+    # dead is not told how to feel about it.
+    assert "often makes you more" not in mod._build_prompt(
+        snap, None, "you were just brought back to life after dying"
+    )
+
+
+def test_the_guest_still_comes_before_the_nudge(direct_vm, direct_deploy, direct_bob):
+    """The nudge is appended last, so it can never wedge itself between the
+    guest's name and the instruction to answer them."""
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
+    _greet(pet, direct_vm, direct_bob, "Are you awake?")
+
+    direct_vm.clear_mocks()
+    direct_vm.mock_llm(
+        r"answer Kuzya in your reply\. This kind of moment often makes you more",
+        _reply(quote="BOTH, IN ORDER"),
+    )
+    direct_vm.mock_llm(r".*", _reply(quote="OUT OF ORDER"))
+    assert pet.pet() == "BOTH, IN ORDER"
+
+
+def test_off_nudge_trait_is_still_accepted(direct_vm, direct_deploy):
+    """The contract must not filter the model's choice against the nudge.
+
+    Rejecting an off-nudge word would rotate the leader over a word choice — a
+    round of consensus spent on nothing — and would make the character a log of
+    which button was pressed rather than of how the pet took it. A pet petted in
+    a thunderstorm is allowed to answer "gloomy".
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    _act(direct_vm, pet, trait="gloomy")           # pet() nudges affectionate
+
+    c = pet.get_character()
+    assert _level(c, "gloomy") == 1
+    assert _level(c, "affectionate") == 0
+    assert c["evolutions"] == 1
+
+
+def test_the_nudge_table_only_ever_names_traits_the_contract_knows(direct_deploy):
+    """A typo here would suggest a word _evolve then silently ignores — a nudge
+    that steers the model into a dead end and looks like it worked."""
+    mod = _contract_module(direct_deploy)
+    assert set(mod.TRAIT_NUDGE) == {"pet", "play", "feed", "visit", "check"}
+    for suggested in mod.TRAIT_NUDGE.values():
+        assert suggested in mod.TRAITS
 
 
 def test_the_acquired_character_reaches_the_model(direct_vm, direct_deploy):

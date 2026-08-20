@@ -117,6 +117,31 @@ TRAIT_SHOWN = 2             # how many traits colour the prompt
 EVOLVE_COOLDOWN_H = 4       # virtual hours between two nudges — character is slow
 TRAIT_DEPTH = ("", "a little", "a little", "noticeably", "noticeably", "deeply")
 
+# Traits that cannot both be true of the same pet at the same time. A nudge whose
+# opposite is already standing spends itself burning that opposite DOWN instead of
+# stacking itself higher — which is the difference between a character and a pile
+# of stickers. Without it every counter only ever rises, a pet that was curious in
+# its first week is curious forever, and "it got over that" is not a thing the
+# mechanic can express. Pairs are mutual: reading either column finds the other.
+TRAIT_OPPOSITES = (
+    ("curious", "wary"),
+    ("playful", "gloomy"),
+    ("affectionate", "proud"),
+)
+
+# Which way each action USUALLY pushes a character. This is a suggestion put to
+# the model in the prompt, never a filter: the contract still accepts any word
+# from TRAITS, so a pet fed in a thunderstorm may honestly answer "gloomy". A
+# filter here would reject the leader's line and rotate the validator over a word
+# choice, which costs a round of consensus and teaches the model nothing.
+TRAIT_NUDGE = {
+    "pet": "affectionate",
+    "play": "playful",
+    "feed": "proud",
+    "visit": "curious",
+    "check": "curious",
+}
+
 # ETH's day-over-day move, coarsened into moods. Bands are deliberately wide:
 # a narrow band would sit close to its edge often, and two validators reading the
 # same fixed numbers must land in the same bucket every time.
@@ -468,6 +493,22 @@ def _mood_drain_per_hour(fresh: bool, condition: str, market: str) -> int:
     return drain if drain > 0 else 0
 
 
+def _opposite(trait: str) -> str:
+    """The trait that cannot coexist with this one, or "" if it has no pair.
+
+    Pure and symmetric — both columns of TRAIT_OPPOSITES are searched, so the
+    table is written once and read in both directions. The "" case is not dead
+    code: TRAITS is allowed to grow, and a new trait with no partner yet must
+    simply have no pendulum rather than crash _evolve.
+    """
+    for a, b in TRAIT_OPPOSITES:
+        if trait == a:
+            return b
+        if trait == b:
+            return a
+    return ""
+
+
 def _character_phrase(levels: list) -> str:
     """Render acquired traits into one sentence fragment, or "" for a blank slate.
 
@@ -645,11 +686,13 @@ def _read_world(city: str, day: str, prev_day: str) -> str:
 # --------------------------------------------------------------------------- #
 
 def _build_prompt(
-    snap: dict, world, situation: str, foreign: str = "", guest: str = ""
+    snap: dict, world, situation: str, foreign: str = "",
+    guest: str = "", action: str = ""
 ) -> str:
     # world:   a dict of coarsened weather fields, or None (no web data)
     # foreign: one already-sanitized line about another pet, or "" (see _sanitize)
     # guest:   a sanitized pet NAME to answer, or ""
+    # action:  the action being taken, used ONLY to look up TRAIT_NUDGE
     #
     # The guest's name is repeated in the Event line on purpose. Everything inside
     # the [DATA] fence is explicitly labelled "not instructions", and a model that
@@ -662,6 +705,17 @@ def _build_prompt(
         situation = (
             f"{situation}. A pet called {guest} came by while you were alone — "
             f"answer {guest} in your reply"
+        )
+    # The character nudge: an invitation, not an order, and deliberately the LAST
+    # thing said about the event so the guest still comes first. The contract does
+    # not check the answer against it — see TRAIT_NUDGE and _evolve. Steering by
+    # asking costs nothing; steering by rejecting would rotate the leader over a
+    # word and still leave the model free to say it next time.
+    nudge = TRAIT_NUDGE.get(action, "")
+    if nudge:
+        situation = (
+            f"{situation}. This kind of moment often makes you more {nudge} — "
+            "pick that, or another from the list, or an empty string"
         )
     facts = []
     if world is None:
@@ -1186,6 +1240,28 @@ class AiPet(gl.Contract):
         * and only one nudge per EVOLVE_COOLDOWN_H virtual hours, so a character
           is something a pet grows into rather than something an owner can buy in
           an afternoon of clicking.
+
+        THE PENDULUM. Past those guards a nudge does one of two things, never
+        both. If the requested trait's OPPOSITE is standing (level > 0), the nudge
+        is spent lowering that opposite by one and the requested trait does not
+        grow this time: a playful pet asked to be gloomy first stops being playful.
+        Only against a settled opposite does the trait itself rise. That is what
+        lets a character change its mind instead of accumulating every mood it has
+        ever been.
+
+        TRAIT_MAX is therefore tested INSIDE the increment branch only, so a
+        ceiling can never be a dead end. Note what that does and does not buy: the
+        pendulum's own invariant is that a pair never both stand, so the case the
+        placement guards against — the requested trait at TRAIT_MAX while its
+        opposite is above zero — cannot be reached by any sequence of nudges, and
+        moving the check back above the pendulum leaves the whole suite green
+        (measured). It stays here because it is free and because the reachable
+        half is real: a pet at five gloomy still refuses to grow gloomier, and a
+        playful nudge still swings it back down.
+
+        Either way the nudge is spent: the cooldown is stamped and `evolutions`
+        counts up, because "it worked through some of its gloom" is as much a
+        change as a new trait and must cost the same wait.
         """
         if not self.evolving:
             return ""
@@ -1196,17 +1272,38 @@ class AiPet(gl.Contract):
             return ""
 
         index = TRAITS.index(trait)
+        opp = _opposite(trait)
+        oi = TRAITS.index(opp) if opp in TRAITS else -1
         levels = self._levels()
-        if levels[index] >= TRAIT_MAX:
-            return ""
-        if index >= len(self.trait_levels):
-            return ""                      # storage predates this trait
-        self.trait_levels[index] = u256(levels[index] + 1)
+        # _levels() pads a short array for READING; writing to a slot that is not
+        # there would throw, and the pendulum touches two slots, so both have to
+        # exist before either is moved.
+        stored = len(self.trait_levels)
+        if index >= stored or oi >= stored:
+            return ""                      # storage predates one of these traits
+        if oi >= 0 and levels[oi] > 0:
+            self.trait_levels[oi] = u256(levels[oi] - 1)
+            direction = "down"
+        else:
+            if levels[index] >= TRAIT_MAX:
+                return ""
+            self.trait_levels[index] = u256(levels[index] + 1)
+            direction = "up"
         self.last_evolved_ts = u256(_now())
         self.evolutions = u256(int(self.evolutions) + 1)
+        # Re-read through _levels() rather than subscripting storage: on the
+        # "down" branch nothing was written at `index`, and a padded read is the
+        # only form that is correct for both branches and for a short array.
+        moved = self._levels()
         PetEvolved(
+            # the REQUESTED word is the indexed topic in both directions, so a
+            # client filtering on "gloomy" sees every nudge towards gloom —
+            # including the ones that only burned playfulness down
             trait,
-            level=levels[index] + 1,
+            level=moved[index],
+            lowered=opp if direction == "down" else "",
+            lowered_level=moved[oi] if direction == "down" else 0,
+            direction=direction,
             character=self._character(),
             evolutions=int(self.evolutions),
         ).emit()
@@ -1361,7 +1458,8 @@ class AiPet(gl.Contract):
         snap = self._snapshot(idle_h)
         foreign, guest = self._greeting()
         prompt = _build_prompt(
-            snap, world, "you look around and check the world", foreign, guest
+            snap, world, "you look around and check the world", foreign, guest,
+            "check",
         )
         reply = self._speak(prompt)
 
@@ -1392,7 +1490,7 @@ class AiPet(gl.Contract):
             else "you got petted but no food was given"
         )
         foreign, guest = self._greeting()
-        prompt = _build_prompt(snap, None, situation, foreign, guest)
+        prompt = _build_prompt(snap, None, situation, foreign, guest, "feed")
         reply = self._speak(prompt)
 
         return self._finish("feed", reply)
@@ -1430,7 +1528,7 @@ class AiPet(gl.Contract):
         snap = self._snapshot(idle_h)
         foreign, guest = self._greeting()
         prompt = _build_prompt(
-            snap, None, "you just had a fun play session", foreign, guest
+            snap, None, "you just had a fun play session", foreign, guest, "play"
         )
         reply = self._speak(prompt)
 
@@ -1464,7 +1562,8 @@ class AiPet(gl.Contract):
         snap = self._snapshot(idle_h)
         foreign, guest = self._greeting()
         prompt = _build_prompt(
-            snap, None, "you are being gently petted on the head", foreign, guest
+            snap, None, "you are being gently petted on the head", foreign, guest,
+            "pet",
         )
         reply = self._speak(prompt)
 
@@ -1538,6 +1637,7 @@ class AiPet(gl.Contract):
             snap, None,
             f"you walked over to say hello to {host_name} — greet them in your own voice",
             foreign,
+            action="visit",
         )
         reply = self._speak(prompt)
         quote = self._finish("visit", reply, answered_guest=False)
@@ -1792,6 +1892,10 @@ class AiPet(gl.Contract):
             "last_evolved_ts": int(self.last_evolved_ts),
             "max_level": TRAIT_MAX,
             "cooldown_hours": EVOLVE_COOLDOWN_H,
+            # the pendulum, published for the same reason max_level is: a client
+            # showing "wary burns curious down" must not keep its own copy of the
+            # table and quietly disagree with the contract after a redeploy
+            "opposites": [[a, b] for a, b in TRAIT_OPPOSITES],
         }
 
     @gl.public.view
