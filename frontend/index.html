@@ -944,6 +944,45 @@
     clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important;
   }
 
+  /* ── the shelf: every pet this wallet owns, one press away ───────────── */
+  .pet-rail {
+    position: fixed; z-index: 60; right: 12px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 7px; width: 110px;
+    max-height: min(70vh, 520px); overflow-y: auto; padding: 9px 7px;
+    border-radius: 15px; background: rgba(222,220,216,.85); backdrop-filter: blur(9px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.85), inset 0 0 0 1px rgba(28,29,31,.08),
+      0 10px 26px rgba(18,20,16,.16);
+  }
+  .pet-rail__label {
+    margin: 0 0 1px; font-family: var(--mono); font-size: 7px; font-weight: 700;
+    letter-spacing: .24em; text-transform: uppercase; color: var(--ink-faint); text-align: center;
+  }
+  .pet-chip {
+    display: grid; gap: 2px; width: 100%; padding: 7px 8px; border: 0; border-radius: 10px;
+    cursor: pointer; text-align: left; background: rgba(255,255,255,.5); color: var(--ink-dim);
+    font-family: var(--mono);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 1px 2px rgba(0,0,0,.12);
+    transition: transform .12s ease, background .15s ease, color .15s ease;
+  }
+  .pet-chip b {
+    font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .pet-chip span { font-size: 7px; letter-spacing: .06em; color: var(--ink-faint); }
+  .pet-chip:hover { transform: translateX(-2px); color: var(--ink); background: rgba(255,255,255,.75); }
+  .pet-chip.current {
+    color: var(--ink); background: var(--chrome-pill); background-size: 100% 260%;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 -2px 3px rgba(0,0,0,.25),
+      0 2px 5px rgba(0,0,0,.2);
+  }
+  .pet-chip.current span { color: var(--ink-dim); }
+  .pet-chip--new { text-align: center; background: rgba(255,255,255,.3); }
+  .pet-chip--new b { font-size: 12px; }
+  @media (max-width: 940px) {
+    /* off the device's flank, tucked above the status console */
+    .pet-rail { right: 8px; top: auto; bottom: 76px; transform: none; width: 94px; max-height: 38vh; }
+  }
+
   #status.console {
     position: fixed; z-index: 75; left: 50%; bottom: 18px; width: max-content;
     max-width: min(560px, calc(100vw - 32px)); transform: translateX(-50%);
@@ -1141,6 +1180,11 @@
 
     <button class="wallet-mini" id="connectWallet" type="button">Connect wallet</button>
   </header>
+
+  <!-- The shelf: every pet this wallet owns. Filled by refreshMyPets() from two
+       sources merged — pets this browser hatched (localStorage) and pets the
+       directory lists under this owner. Hidden until a wallet is connected. -->
+  <aside class="pet-rail" id="petRail" aria-label="Your pets" hidden></aside>
 
   <main class="app-main">
     <section class="app-page game-page" data-page="play" aria-label="Play with your pet">
@@ -2278,12 +2322,15 @@ function pressB() {                              // confirm
   // wants to the question "how do I play".
   if (!client || !address) { $("petName").focus(); return; }
 
+  // Confirm FIRST, dead-pet redirect second. The other way round, a dead pet's
+  // B press re-opened the same revive confirmation forever — "b = yes" was on
+  // screen and yes could never be said, so revive was simply unreachable.
+  if (ui.view === "confirm") { runPending(); return; }
   if (!alive) {                                  // a dead pet offers one thing
     ui.pending = { key: "revive", label: "revive", icon: "heart" };
     ui.view = "confirm";
     return;
   }
-  if (ui.view === "confirm") { runPending(); return; }
 
   const m = menuItems()[ui.cursor];
   if (!m) return;
@@ -2484,6 +2531,9 @@ async function useSigner(mode, addr, { silent = false } = {}) {
       funds === 0n ? "warn" : "ok");
   }
   paintSteps();
+  // Not awaited: the shelf filling in (and a returning player's pet opening)
+  // must never hold the "connected" answer hostage to a directory read.
+  refreshMyPets({ autoOpen: true });
 }
 
 let walletWatched = false;
@@ -2494,6 +2544,7 @@ function watchWallet(provider) {
   provider.on("accountsChanged", async (accounts) => {
     if (!accounts?.length) {
       signerMode = null; signerAddress = null; rebuildClient();
+      myPets = []; renderPetRail();
       $("walletMeta").textContent = "The wallet disconnected. Reconnect to play.";
       setStatus("The wallet disconnected.", "warn"); paintSteps(); return;
     }
@@ -2625,6 +2676,7 @@ $("hatch").onclick = async () => {
     if (!born) throw new Error("the deploy was accepted but reported no contract address");
 
     $("petName").value = "";
+    rememberPet(born, name);      // onto the shelf before the first state read
     await openPet(born);
     setStatus(`${name} is alive.\n${born}\nIt is yours — the contract recorded you as its owner.`, "ok");
     ui.message = "hello"; ui.view = "home";
@@ -2650,12 +2702,115 @@ async function openPet(addr, { announce = false } = {}) {
   address = addr; LS.a = addr; $("addr").value = addr;
   if (!client) rebuildClient();
   refreshShareLink();
+  renderPetRail();               // move the shelf's highlight to this pet
   setBusy(false);
   await loadState();
   loadDirectory({});
   startAutoRefresh();
   paintSteps();
 }
+
+// ── the shelf: which pets belong to this wallet ───────────────────────────
+//
+// Hatching deploys a contract and registers it nowhere, so no single place
+// knows "this wallet's pets". Two partial sources, merged: every pet this
+// browser hatched (kept per-wallet under aipet_mine) and every pet the
+// directory lists under this owner (get_pets is the cheap storage read — no
+// sub-VM per pet, unlike the leaderboard). A re-installed browser recovers
+// from the directory; an unregistered pet survives in localStorage.
+let myPets = [];
+
+function mineAll() {
+  try { return JSON.parse(localStorage.getItem("aipet_mine") || "{}"); }
+  catch { return {}; }
+}
+
+/** Record a pet as this wallet's. Cheap to call repeatedly — writes only on news. */
+function rememberPet(addr, name) {
+  if (!signerAddress || !/^0x[0-9a-fA-F]{40}$/.test(addr || "")) return;
+  const clean = String(name || "").slice(0, 24);
+  const all = mineAll(), key = signerAddress.toLowerCase();
+  const list = all[key] || (all[key] = []);
+  const hit = list.find(p => p.address.toLowerCase() === addr.toLowerCase());
+  if (hit && (!clean || hit.name === clean)) return;
+  if (hit) hit.name = clean;
+  else list.push({ address: addr, name: clean || "pet" });
+  localStorage.setItem("aipet_mine", JSON.stringify(all));
+  const shown = myPets.find(p => p.address.toLowerCase() === addr.toLowerCase());
+  if (shown) shown.name = clean || shown.name;
+  else myPets.push({ address: addr, name: clean || "pet" });
+  renderPetRail();
+}
+
+async function refreshMyPets({ autoOpen = false } = {}) {
+  if (!signerAddress) { myPets = []; renderPetRail(); return; }
+  const me = signerAddress.toLowerCase();
+  const fromDir = [];
+  if (client && factoryAddress) {
+    try {
+      // page through the roster; the directory is unbounded but a wallet is not
+      for (let offset = 0; offset < 200; offset += 50) {
+        const rows = await client.readContract({
+          address: factoryAddress, functionName: "get_pets", args: [offset, 50],
+        });
+        if (!Array.isArray(rows) || !rows.length) break;
+        for (const r of rows) {
+          if (String(r.owner || "").toLowerCase() === me) fromDir.push(r);
+        }
+        if (rows.length < 50) break;
+      }
+    } catch { /* directory unreachable — the local list still stands */ }
+  }
+  // The local list is read AFTER the awaits above, not before: while the
+  // directory answered, loadState may have remembered the pet on screen, and a
+  // stale snapshot taken up front would overwrite that entry right off the rail.
+  const merged = new Map();
+  for (const p of mineAll()[me] || []) merged.set(p.address.toLowerCase(), { ...p });
+  for (const r of fromDir) {
+    const key = String(r.address).toLowerCase();
+    const known = merged.get(key);
+    if (known) { if (r.name && known.name === "pet") known.name = r.name; }
+    else merged.set(key, { address: r.address, name: r.name || "pet" });
+  }
+  myPets = [...merged.values()];
+  renderPetRail();
+  // A returning player should land on their pet, not on a form. Only when the
+  // page is not already pointed anywhere — a shared link always wins.
+  if (autoOpen && !address && !$("addr").value.trim() && myPets.length) {
+    const last = myPets[myPets.length - 1];
+    await openPet(last.address);
+    setStatus(`Welcome back — opened ${last.name} (${short(last.address)}).\n`
+      + (myPets.length > 1 ? "The shelf on the right switches between your pets." : ""), "ok");
+  }
+}
+
+function renderPetRail() {
+  const rail = $("petRail");
+  if (!signerAddress || !myPets.length) { rail.hidden = true; return; }
+  const cur = (address || "").toLowerCase();
+  rail.innerHTML = `<p class="pet-rail__label">my pets</p>`
+    + myPets.map(p => {
+        const here = p.address.toLowerCase() === cur;
+        return `<button type="button" class="pet-chip${here ? " current" : ""}"`
+          + ` data-pet="${escapeHtml(p.address)}" title="${escapeHtml(p.address)}"`
+          + (here ? ` aria-current="true"` : "")
+          + `><b>${escapeHtml(p.name || "pet")}</b><span>${escapeHtml(short(p.address))}</span></button>`;
+      }).join("")
+    + `<button type="button" class="pet-chip pet-chip--new" data-new-pet`
+    + ` title="hatch another pet"><b>+</b><span>new pet</span></button>`;
+  rail.hidden = false;
+}
+
+$("petRail").addEventListener("click", async (e) => {
+  const chip = e.target.closest("button");
+  if (!chip || busy) return;
+  if (chip.hasAttribute("data-new-pet")) { activateRoute("new-pet"); return; }
+  const addr = chip.dataset.pet;
+  if (!addr || addr.toLowerCase() === (address || "").toLowerCase()) return;
+  activateRoute("play");
+  await openPet(addr);
+  setStatus(`Switched to ${short(addr)}.`, "ok");
+});
 
 $("connect").onclick = () => openPet($("addr").value.trim(), { announce: true });
 $("refresh").onclick = () => loadState();
@@ -2736,6 +2891,20 @@ async function doAction(fn, opts = {}) {
     ui.message = "no wallet";
     setStatus(`${fn}() is a transaction, so it needs a wallet to sign it.\n`
       + "Press Connect wallet above — reading this pet needed nothing, but feeding it does.", "err");
+    beep(180, 160);
+    return false;
+  }
+
+  // The contract refuses every _tick action on a dead pet ("pet is dead — call
+  // revive()"), but only AFTER a full consensus round — twenty seconds to a few
+  // minutes of "working…" ending in a revert is how "everything got slow and it
+  // stopped talking" reads from the outside. Refuse locally, instantly, and say
+  // which press actually helps. Targeted calls stay: they go to somebody
+  // else's pet, whose life this page does not track.
+  if (!opts.target && !alive && ["check", "feed", "play", "pet", "visit"].includes(fn)) {
+    ui.message = "it is dead";
+    setStatus(`${fn}() would just be refused — the pet is dead.\n`
+      + "Press B to revive it first; everything works again after that.", "err");
     beep(180, 160);
     return false;
   }
@@ -2932,6 +3101,9 @@ async function loadState(opts = {}) {
 
     const me = (signerAddress || "").toLowerCase();
     isOwner = !!me && String(owner || "").toLowerCase() === me;
+    // Opened by address, turned out to be ours — the shelf should know it.
+    // Also picks up the real name for pets remembered before it was read.
+    if (isOwner) rememberPet(address, s.name);
 
     $("modelTag").textContent = timeScale > 1 ? `GEN-${timeScale}×` : "GEN-001";
     $("ownerBox").hidden = !isOwner;
