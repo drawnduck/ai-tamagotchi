@@ -1635,8 +1635,33 @@ function bar(x, y, w, value) {
 //    no head-room, and on Bradbury that limit is too tight to execute with:
 //    pet() with the raw estimate (841 511) reverted after burning 803 864, while
 //    the same call with 4× head-room succeeded using only 795 361.
+//    The multiplied estimate then has to be CLAMPED to the block, or the node
+//    rejects the transaction outright with "transaction's gas limit N exceeds
+//    block's gas limit M" and nothing is even attempted. That is not a tail
+//    case: hatching costs ~32M raw, so 4× is 128M against Bradbury's 100M block.
+//    Head-room is what makes these calls execute, not the multiplier itself, so
+//    take whatever head-room fits under the block instead of a fixed factor.
 const GAS_MULTIPLIER = 4n;
 const _fetch = window.fetch.bind(window);
+let _blockGasCap = null;                // cached; one extra RPC call at most
+async function gasCeiling(input) {
+  if (_blockGasCap !== null) return _blockGasCap;
+  try {
+    const res = await _fetch(input, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0", id: 1, method: "eth_getBlockByNumber", params: ["latest", false],
+      }),
+    });
+    const limit = BigInt((await res.json())?.result?.gasLimit ?? 0);
+    // the node rejects at >, and estimates wobble between blocks
+    _blockGasCap = limit > 0n ? (limit * 99n) / 100n : 0n;
+  } catch {
+    _blockGasCap = 0n;                  // unknown — send unclamped rather than fail here
+  }
+  return _blockGasCap;
+}
 window.fetch = async (input, init) => {
   const res = await _fetch(input, init);
   if (typeof init?.body !== "string" || !init.body.includes("eth_estimateGas")) return res;
@@ -1644,7 +1669,13 @@ window.fetch = async (input, init) => {
     if (JSON.parse(init.body).method !== "eth_estimateGas") return res;
     const payload = await res.clone().json();
     if (typeof payload.result !== "string") return res;
-    payload.result = "0x" + (BigInt(payload.result) * GAS_MULTIPLIER).toString(16);
+    const raw = BigInt(payload.result);
+    const cap = await gasCeiling(input);
+    let buffered = raw * GAS_MULTIPLIER;
+    // Never go BELOW the estimate: if the raw cost alone does not fit the block,
+    // no clamp can save the call and the node's own error is the honest answer.
+    if (cap > 0n && buffered > cap) buffered = cap > raw ? cap : raw;
+    payload.result = "0x" + buffered.toString(16);
     return new Response(JSON.stringify(payload), { status: res.status, headers: res.headers });
   } catch { return res; }
 };
