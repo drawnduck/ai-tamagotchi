@@ -2789,11 +2789,17 @@ async function doAction(fn, opts = {}) {
       ui.progress = "settling";
       setStatus(`${fn}() accepted ✓\nWaiting for the node to serve the new state — `
         + "consensus has applied it, the read catches up a moment later.");
-      const moved = await settleState(before);
-      setStatus(moved
-        ? `${fn}() done ✓`
-        : `${fn}() accepted ✓ — but the node is still serving the old state.\n`
-          + "It will catch up on the next refresh.", moved ? "ok" : "warn");
+      // Consensus already applied the write — whatever happens below, the pet
+      // HAS acted and HAS spoken. Only the reading back is in doubt, so none of
+      // these say anything that sounds like the action was lost.
+      const settled = await settleState(before);
+      setStatus({
+        moved: `${fn}() done ✓`,
+        stale: `${fn}() done ✓ — consensus applied it and the pet has spoken.\n`
+          + "This node is still answering with the older state; the next refresh shows it.",
+        unreadable: `${fn}() done ✓ — consensus applied it and the pet has spoken.\n`
+          + "The node stopped answering reads, so the screen is behind. Press refresh in a moment.",
+      }[settled], settled === "moved" ? "ok" : "warn");
     }
     ui.view = !opts.target && (fn === "check" || fn === "play" || fn === "pet" || fn === "feed")
       ? "talk" : "home";
@@ -2880,17 +2886,28 @@ const fingerprint = () => JSON.stringify([
  * a pet that says the exact same sentence twice is unlikely but not impossible,
  * and hanging on that would be worse than the stale line ever was.
  */
-// A round is one loadState (seven reads, ~3 s against Bradbury) plus the gap,
-// so six rounds is roughly twenty seconds of patience. The state has been
-// measured landing after about five, which is round two.
-async function settleState(before, tries = 6, gap = 900) {
+// A round is one loadState (seven reads, ~3 s against Bradbury) plus the gap.
+// Measured after a feed(): consensus ACCEPTED at 20 s, and the new state was
+// served on the very first read 1.3 s later — so the common case needs one
+// round. The window is long anyway because reads are free and the failure it
+// guards against is not slowness but CONGESTION: Bradbury throttles, reads
+// start erroring, and giving up early tells the player the pet went quiet when
+// it actually spoke.
+//
+// Returns why it stopped, because those reasons need different words:
+//   "moved"      the state arrived
+//   "stale"      reads worked and kept answering with the old state
+//   "unreadable" every read threw — the node is not answering at all, which is
+//                NOT the same thing and must not be reported as staleness
+async function settleState(before, tries = 16, gap = 900) {
+  let reads = 0;
   for (let i = 0; i < tries; i++) {
-    await loadState({ quiet: true });
-    if (fingerprint() !== before) return true;
+    if (await loadState({ quiet: true })) reads++;
+    if (fingerprint() !== before) return "moved";
     ui.progress = "settling";
     await new Promise(r => setTimeout(r, gap));
   }
-  return false;
+  return reads === 0 ? "unreadable" : "stale";
 }
 
 async function loadState(opts = {}) {
@@ -2966,14 +2983,16 @@ async function loadState(opts = {}) {
     lastOkAt = Date.now(); stale = false;
     if (!busy) setBusy(false);
     renderLive();
+    return true;
   } catch (e) {
     if (quiet) {
       // A background poll must not clobber the status line: it may be showing
       // transaction progress or a revert the user still needs to read.
-      stale = true; renderLive(); return;
+      stale = true; renderLive(); return false;
     }
     setStatus("Could not read state: " + (e?.message || e)
       + "\nCheck the contract address and the network.", "err");
+    return false;
   }
 }
 
