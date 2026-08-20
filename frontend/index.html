@@ -1900,6 +1900,23 @@ const linked = {
   dir: (PARAMS.get("dir") || "").trim(),
   net: (PARAMS.get("net") || "").trim(),
 };
+
+// `?scale=720` hatches a demo pet that ages 720 virtual seconds per real one.
+// Deliberately a URL parameter and not a field: a first-time player should type
+// a name and nothing else, so the only way to ask for a compressed clock is to
+// already know you want one. The contract requires a divisor of 3600 (otherwise
+// the decay cursor's leftover division truncates and quietly forgives drift), so
+// check it here too rather than paying gas for a certain revert.
+const HATCH_SCALE = (() => {
+  const raw = (PARAMS.get("scale") || "").trim();
+  if (!raw) return 1;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 3600 || 3600 % n !== 0) {
+    console.warn(`ignoring ?scale=${raw}: time_scale must be a whole divisor of 3600`);
+    return 1;
+  }
+  return n;
+})();
 if (/^0x[0-9a-fA-F]{40}$/.test(linked.pet)) $("addr").value = linked.pet;
 if (/^0x[0-9a-fA-F]{40}$/.test(linked.dir)) $("factoryAddr").value = linked.dir;
 if (linked.net && $("net").querySelector(`option[value="${CSS.escape(linked.net)}"]`)) {
@@ -2522,9 +2539,18 @@ $("hatch").onclick = async () => {
     }
 
     setStatus(`Deploying ${name}'s own contract (${code.length} bytes)…\n`
+      + (HATCH_SCALE > 1
+        ? `Demo clock: 1 real second = ${HATCH_SCALE} virtual seconds. `
+          + `It ages a day every ${(86400 / HATCH_SCALE).toFixed(0)}s.\n`
+        : "")
       + "Your wallet will ask you to confirm. This is the one expensive step; "
       + "everything after it is cheap.");
-    const hash = await client.deployContract({ code, args: [name, HATCH_PERSONA, city] });
+    // Only pass the 4th constructor argument when it is not the default, so an
+    // ordinary hatch sends exactly the call it always sent.
+    const ctorArgs = HATCH_SCALE > 1
+      ? [name, HATCH_PERSONA, city, HATCH_SCALE]
+      : [name, HATCH_PERSONA, city];
+    const hash = await client.deployContract({ code, args: ctorArgs });
     const tx = await waitForSettled(client, hash, {
       onProgress: (n, ms) => {
         ui.progress = n.toLowerCase().slice(0, CHARS_PER_LINE);
