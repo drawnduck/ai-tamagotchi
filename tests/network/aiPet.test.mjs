@@ -281,16 +281,18 @@ test("feed() moves real GEN into the contract and credits the feeder", async () 
 
 test("the till keeps a 1 GEN revive reserve", async () => {
   // The guard, asserted whatever the funding level is. Anything above the
-  // reserve is the owner's; the reserve itself never is, once the pet has been
-  // fed. A pet nobody ever fed made no such promise and keeps none back.
+  // reserve is the owner's; the reserve itself never is, once the pet's lifetime
+  // food has reached a whole revive. A till that has never taken in that much
+  // has promised nobody a revive — and could not perform one if it wanted to,
+  // since the same threshold gates till_revive_ready — so it keeps nothing back.
   const s = await read("get_state");
   const held = await client.getBalance({ address });
   const withdrawable = BigInt(s.withdrawable_wei ?? held.toString());
   const fed = BigInt(s.total_fed_wei);
   const reserve = BigInt(s.revive_cost_wei);
 
-  if (fed === 0n) {
-    assert.equal(withdrawable, held, "an unfed pet reserves nothing");
+  if (fed < reserve) {
+    assert.equal(withdrawable, held, "a pet fed less than one revive reserves nothing");
     return;
   }
   assert.equal(
@@ -321,9 +323,10 @@ test("withdraw() emits a plain value transfer, not a method call", async (t) => 
   const held = await client.getBalance({ address });
   assert.ok(held > 0n, "nothing to withdraw — did feed() run?");
 
-  // Once anyone has fed the pet, REVIVE_COST stays behind as the next revive, so
-  // the owner may only take withdrawable_wei — which at this suite's funding
-  // level (FEED_WEI is 0.05 GEN against a 1 GEN reserve) is usually zero. The
+  // Once the pet's LIFETIME food reaches REVIVE_COST, one GEN stays behind as
+  // the next revive, so the owner may only take withdrawable_wei — which at this
+  // suite's funding level (FEED_WEI is 0.05 GEN against a 1 GEN threshold) is
+  // usually the whole balance, because the reserve has not switched on yet. The
   // contract publishes the number precisely so a client never has to work it out.
   const st = await read("get_state");
   const withdrawable = BigInt(st.withdrawable_wei ?? held.toString());
@@ -340,7 +343,13 @@ test("withdraw() emits a plain value transfer, not a method call", async (t) => 
   assert.equal(Number(msg.messageType), 0, "must be a plain transfer, not a contract call");
   assert.equal(msg.data, "0x", "a wallet cannot execute calldata — it must be empty");
   assert.equal(msg.recipient.toLowerCase(), owner.address.toLowerCase());
-  assert.equal(BigInt(msg.value), held);
+  // `withdrawable`, NOT `held`. The two are equal only when no reserve applies,
+  // and the skip above means this line is reached only when one DOES: the
+  // assertion could never have been true where it could be reached. It was
+  // dormant purely because FEED_WEI is small enough that withdrawable is zero on
+  // a fresh deploy, so it would have fired the first time anyone ran the suite
+  // against a well-fed PET_ADDRESS — the documented cheap path at the top.
+  assert.equal(BigInt(msg.value), withdrawable);
 
   process.env.WITHDRAW_TX = tx.txId ?? "";
 });
