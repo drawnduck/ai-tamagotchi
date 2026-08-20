@@ -65,6 +65,31 @@ HEALTH_FEED_HEAL = 1        # and one that does heals exactly this much, never m
 # longevity ceiling.
 DECAY_BILL_CAP = 200
 
+# --- comfort versus play --------------------------------------------------- #
+# pet() used to be a flat +4 mood for nothing, which made it strictly better
+# than play(): same gas, same spoken line, no satiety cost. A rational owner
+# would only ever pet, and play() would survive as prompt decoration. So pet()
+# is now comfort — a small nudge with a MECHANICAL ceiling — and play() is the
+# only mechanical route past that ceiling, which is exactly what its food cost
+# is buying.
+#
+# The ceiling is 80 and not HATCH_MOOD: a cap of 70 would make the very first
+# pet() of a brand-new pet (mood starts at HATCH_MOOD == 70) a silent no-op on
+# the most-clicked button in the game. 80 keeps play() the only mechanical way
+# past the cap and still gives a new owner five visible pets
+# (70 -> 72 -> 74 -> 76 -> 78 -> 80).
+#
+# It is a cap on the MECHANIC, never on the pet. _apply_reply adds the model's
+# own -3..+3 afterwards with no ceiling, so a petted pet can and does end above
+# PET_MOOD_CAP. The cap is therefore applied exactly once, before _speak, and
+# never re-applied after the reply — a second clamp would let the leader and a
+# validator disagree about whether pet() worked at all.
+PET_MOOD = 2                # comfort, not a mood pump
+PET_MOOD_CAP = 80           # the ceiling pet()'s own bump may reach
+PLAY_MOOD = 10              # play is the only mechanical way past that ceiling
+PLAY_SATIETY = 8            # and food is what it charges for the privilege
+PLAY_MOOD_ELDER = 5         # an old pet tires faster (used by the stage table in PR 3)
+
 # Socialising. The cooldown is what stops two pets from pumping each other's
 # mood to 100 by trading visits in a loop — after the first one, the same
 # counterparty stops paying out until this many virtual hours have passed.
@@ -1120,12 +1145,17 @@ class AiPet(gl.Contract):
 
     @gl.public.write
     def play(self) -> str:
-        """Play: mood goes up, satiety goes down."""
+        """Play: mood goes up, satiety goes down.
+
+        No cooldown and no ceiling beyond _clamp's 100 — play is deliberately the
+        one mechanical route above PET_MOOD_CAP, and PLAY_SATIETY is the price of
+        that route. The owner pays for mood in food.
+        """
         idle_h, still_alive = self._tick()
         if not still_alive:
             return str(self.last_quote)
-        self.mood = _clamp(int(self.mood) + 10)
-        self.satiety = _clamp(int(self.satiety) - 8)
+        self.mood = _clamp(int(self.mood) + PLAY_MOOD)
+        self.satiety = _clamp(int(self.satiety) - PLAY_SATIETY)
 
         snap = self._snapshot(idle_h)
         foreign, guest = self._greeting()
@@ -1138,11 +1168,28 @@ class AiPet(gl.Contract):
 
     @gl.public.write
     def pet(self) -> str:
-        """Pet it: a light mood boost."""
+        """Pet it: comfort, with a mechanical cap of PET_MOOD_CAP.
+
+        The bump stops at the cap, so petting cannot be farmed into a happy pet:
+        play() is the only mechanical way past it and it charges food for the
+        trip. At or above the cap the mechanic is silent but the pet still
+        speaks — the button is never a no-op for the player, it just stops being
+        a lever.
+
+        The cap lands HERE, before _snapshot and _speak, so the model is shown
+        the mood it will actually be reacting to. It is deliberately not
+        re-applied afterwards: _apply_reply adds the model's -3..+3 on top with
+        no ceiling, so a petted pet may legitimately end above PET_MOOD_CAP.
+        Clamping again after the reply would make the leader and a validator
+        disagree about whether pet() worked.
+        """
         idle_h, still_alive = self._tick()
         if not still_alive:
             return str(self.last_quote)
-        self.mood = _clamp(int(self.mood) + 4)
+        mood = int(self.mood)
+        if mood < PET_MOOD_CAP:
+            room = PET_MOOD_CAP - mood
+            self.mood = _clamp(mood + (PET_MOOD if PET_MOOD < room else room))
 
         snap = self._snapshot(idle_h)
         foreign, guest = self._greeting()

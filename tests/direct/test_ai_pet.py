@@ -44,6 +44,12 @@ SATIETY_PER_HOUR = 2      # mirrors the contract constant
 WEI_PER_SATIETY = 10 ** 16   # mirrors the contract constant
 HEALTH_REGEN_HOURS = 4       # mirrors the contract constant
 HEALTH_FEED_GAIN_MIN = 10    # mirrors the contract constant
+PET_MOOD = 2                 # mirrors the contract constant
+PET_MOOD_CAP = 80            # mirrors the contract constant
+PLAY_MOOD = 10               # mirrors the contract constant
+PLAY_SATIETY = 8             # mirrors the contract constant
+HATCH_MOOD = 70              # mirrors the contract constant
+HATCH_SATIETY = 70           # mirrors the contract constant
 
 # Idle hours that starve the pet all the way to health 0, with slack.
 #
@@ -153,7 +159,8 @@ def test_pet_applies_valid_reply(direct_vm, direct_deploy):
     # the structural validator accepts a well-formed reply (consensus passes on-net)
     assert direct_vm.run_validator()
     s = pet.get_state()
-    assert int(s["mood"]) == 75            # +4 (pet) +1 (mood_delta)
+    # +2 (pet's mechanical bump, cap 80 not reached from 70) +1 (mood_delta)
+    assert int(s["mood"]) == 73
     assert s["last_quote"] == "Purr, thank you."
 
 
@@ -164,8 +171,101 @@ def test_validator_rejects_out_of_range_delta(direct_vm, direct_deploy):
     pet.pet()                              # single-node direct mode does not revert here
     # on a real network the structural validator rejects -> leader rotation:
     assert not direct_vm.run_validator()
-    # and the deterministic clamp bounds it anyway: +4 (pet) + clamp(99 -> +3) = 77
-    assert int(pet.get_state()["mood"]) == 77
+    # and the deterministic clamp bounds it anyway:
+    # +2 (pet, mechanical cap 80) + clamp(99 -> +3) = 75
+    assert int(pet.get_state()["mood"]) == 75
+
+
+# ---------------------- comfort versus play (the cap) ----------------------
+#
+# pet() is comfort: PET_MOOD per press, and its own bump stops at PET_MOOD_CAP.
+# play() is the only mechanical route past that cap and charges PLAY_SATIETY for
+# it. The model's -3..+3 is applied after the cap and is NOT bound by it, so a
+# petted pet can still end above 80 — the cap is on the button, not on the pet.
+
+
+def _pet_to_the_cap(direct_vm, direct_deploy):
+    """A pet sitting exactly at PET_MOOD_CAP, reached only by petting.
+
+    Five presses from HATCH_MOOD: 70 -> 72 -> 74 -> 76 -> 78 -> 80. Deliberately
+    not reached with play(), so these tests keep working once PR 3 forbids an egg
+    from playing — pet() has no age guard.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Mm.", "mood_delta": 0}))
+    for _ in range((PET_MOOD_CAP - HATCH_MOOD) // PET_MOOD):
+        pet.pet()
+    assert int(pet.get_state()["mood"]) == PET_MOOD_CAP
+    return pet
+
+
+def test_a_fresh_hatchling_pet_moves_mood(direct_vm, direct_deploy):
+    """The very first press of the most-clicked button must MOVE the meter.
+
+    This is the regression a cap of HATCH_MOOD would have caused: at a cap of 70
+    a brand-new pet (mood 70) would get cap_room 0 and a bump of 0, so the first
+    pet() ever pressed would be a mechanical no-op. PET_MOOD_CAP is 80 precisely
+    so that a new owner gets five visible presses before the mechanic goes quiet.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Oh. Hello.", "mood_delta": 0}))
+    pet.pet()
+    assert int(pet.get_state()["mood"]) == HATCH_MOOD + PET_MOOD   # 72
+    assert int(pet.get_state()["mood"]) > HATCH_MOOD
+
+
+def test_pet_cannot_push_mood_above_PET_MOOD_CAP(direct_vm, direct_deploy):
+    """Petting is not a mood pump: the mechanic goes silent at the cap.
+
+    Mechanically only. The model's mood_delta is applied after this and ignores
+    the cap entirely — see test_the_model_may_still_lift_mood_past_the_cap.
+    """
+    pet = _pet_to_the_cap(direct_vm, direct_deploy)
+    pet.pet()
+    pet.pet()
+    assert int(pet.get_state()["mood"]) == PET_MOOD_CAP   # still 80, twice over
+
+
+def test_pet_at_cap_still_speaks(direct_vm, direct_deploy):
+    """At the cap the button stops being a lever, never a no-op.
+
+    Comfort at mood 90 is still comfort: the pet answers and the line is fed.
+    """
+    pet = _pet_to_the_cap(direct_vm, direct_deploy)
+    before = len(pet.get_history())
+    direct_vm.clear_mocks()
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Still nice.", "mood_delta": 0}))
+    quote = pet.pet()
+    s = pet.get_state()
+    assert quote == "Still nice."
+    assert s["last_quote"] == "Still nice."
+    assert len(pet.get_history()) == before + 1
+    assert int(s["mood"]) == PET_MOOD_CAP
+
+
+def test_the_model_may_still_lift_mood_past_the_cap(direct_vm, direct_deploy):
+    """The cap binds the mechanic, not _apply_reply.
+
+    The bump is capped BEFORE _speak and never re-applied afterwards, so the
+    model's +3 lands on top of 80. Re-clamping after the reply would let a
+    validator and the leader disagree about whether pet() worked.
+    """
+    pet = _pet_to_the_cap(direct_vm, direct_deploy)
+    direct_vm.clear_mocks()
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Bliss.", "mood_delta": 3}))
+    pet.pet()
+    assert int(pet.get_state()["mood"]) == PET_MOOD_CAP + 3   # 83, and legitimately so
+
+
+def test_play_can_push_mood_above_PET_MOOD_CAP(direct_vm, direct_deploy):
+    """play() is the one mechanical route past the cap, and it charges food."""
+    pet = _pet_to_the_cap(direct_vm, direct_deploy)
+    pet.play()
+    s = pet.get_state()
+    assert int(s["mood"]) == PET_MOOD_CAP + PLAY_MOOD          # 90
+    assert int(s["satiety"]) == HATCH_SATIETY - PLAY_SATIETY   # 70 -> 62
 
 
 # ----------------------------- life stages ---------------------------------
