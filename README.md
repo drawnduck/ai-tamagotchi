@@ -267,17 +267,19 @@ skips 150 hours ahead so the pet **starves to death**, shows that a dead pet ref
 and `revive`s it for 1 GEN — printing the lines, the stat changes, and the feeder leaderboard.
 
 ### Frontend
-Single page, `genlayer-js` from a CDN, no bundler and no downloaded assets — see
+Single page, `genlayer-js` from a CDN and no bundler. The device chassis and button cap are two
+generated transparent product-render assets shipped beside the page; the live interface remains
+HTML/CSS/canvas — see
 [Playing it](#playing-it) for how a player uses it and how to publish it.
 ```bash
 npm run frontend           # builds frontend/ai_pet.py, then serves on 127.0.0.1:5577
 ```
-The page is the toy. Everything inside the screen — a 5×7 bitmap font, the pet, the menu icons,
-the meters — is drawn pixel by pixel onto a 96×72 canvas, because a webfont with letter-spacing is
-the tell that gives away every "retro" interface on the web. Three buttons drive it the way the
-original did: **A** walks the icon menu, **B** confirms, **C** goes back (or `←` `→`, `enter`,
-`esc`). Feeding, playing, petting, checking the world and visiting another pet all ask for
-confirmation on-screen before they spend anything.
+The page is the toy. Its shell is a high-fidelity transparent product render, while everything
+inside the screen — a 5×7 bitmap font, the pet, the menu icons, the meters — is drawn pixel by
+pixel onto a live 96×72 canvas. The three rendered button caps are independent DOM controls with
+real press travel and focus states: **A** walks the icon menu, **B** confirms, **C** goes back (or
+`←` `→`, `enter`, `esc`). Feeding, playing, petting, checking the world and visiting another pet
+all ask for confirmation on-screen before they spend anything.
 
 Everything that is not the toy is a paper slip beside it: the two steps to start, the amount a
 feeding costs, the character sheet, the owner's till, the feeders, the shared board, and every line

@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&family=Rammetto+One&family=Space+Mono:wght@400;700&display=swap" />
+<link rel="preload" as="image" href="assets/aipet-device-render-v1.png" fetchpriority="high" />
 <style>
   /* ═══════════════════════════════════════════════════════════════════════
      LIQUID CHROME
@@ -330,12 +331,184 @@
   }
   @keyframes breathe { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.35); } }
 
+  /* ═══ THE RENDERED OBJECT ═══════════════════════════════════════════════
+     The shell is a transparent product render. Only the parts that have to
+     change remain live: the 96×72 canvas, three button caps, model etching and
+     network light. Keeping those as DOM layers means the object can look
+     photographic without turning the game into a video. */
+  .device { position: relative; padding: 0; isolation: isolate; }
+  .device-float {
+    position: relative;
+    filter: drop-shadow(0 34px 24px rgba(17,18,20,.34));
+    animation: device-float 5.8s cubic-bezier(.45,0,.55,1) infinite;
+    transform-origin: 50% 70%;
+  }
+  @keyframes device-float {
+    0%, 100% { transform: translateY(0) rotate(-.18deg); }
+    50%      { transform: translateY(-7px) rotate(.18deg); }
+  }
+  .render-device {
+    --tilt-x: 0deg;
+    --tilt-y: 0deg;
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1237 / 1271;
+    transform: perspective(980px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y));
+    transform-style: preserve-3d;
+    transition: transform .32s cubic-bezier(.2,.75,.25,1);
+    will-change: transform;
+  }
+  .render-device__body {
+    position: absolute; inset: 0; z-index: 1;
+    display: block; width: 100%; height: 100%; object-fit: contain;
+    user-select: none; pointer-events: none;
+  }
+
+  /* The body render intentionally has no baked lettering: keeping the name in
+     HTML makes it sharp at every size and lets the highlight respond to tilt. */
+  .render-wordmark {
+    position: absolute; z-index: 4; top: 24.8%; left: 50%;
+    transform: translate3d(-50%, 0, 13px);
+    font-family: var(--face); font-size: clamp(19px, 7vw, 29px); font-weight: 400;
+    line-height: 1; letter-spacing: -.025em; white-space: nowrap;
+    color: #8e949a;
+    text-shadow: 0 2px 1px rgba(255,255,255,.95), 0 -1px 1px rgba(14,16,18,.72),
+                 0 5px 8px rgba(20,22,24,.28);
+    opacity: .9; pointer-events: none;
+  }
+
+  /* The generated window is slightly taller than 4:3. The live canvas sits
+     centred inside it at its native ratio; the surrounding olive glass is the
+     letterbox, so no pixel is ever stretched. */
+  .render-screen {
+    position: absolute; z-index: 3; left: 32.2%; top: 38.25%; width: 38.6%;
+    aspect-ratio: 4 / 3; overflow: hidden;
+    border-radius: 4.5% / 6%;
+    transform: translateZ(9px);
+    box-shadow: inset 0 0 0 1px rgba(20,24,12,.24), 0 0 20px rgba(198,209,116,.12);
+    transition: filter .35s ease, box-shadow .35s ease;
+  }
+  .render-screen #lcd { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+  .render-screen::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+      linear-gradient(118deg, rgba(255,255,255,.2) 0%, rgba(255,255,255,0) 35%),
+      repeating-linear-gradient(0deg, rgba(17,22,7,.13) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(17,22,7,.08) 0 1px, transparent 1px 3px);
+    mix-blend-mode: multiply; opacity: .72;
+  }
+  .render-device[data-view="busy"] .render-screen {
+    animation: screen-working 1.15s ease-in-out infinite;
+  }
+  .render-device[data-alive="false"] .render-screen { filter: saturate(.35) brightness(.8); }
+  @keyframes screen-working {
+    0%, 100% { box-shadow: inset 0 0 0 1px rgba(20,24,12,.24), 0 0 15px rgba(198,209,116,.1); }
+    50%      { box-shadow: inset 0 0 0 1px rgba(20,24,12,.32), 0 0 27px rgba(198,209,116,.44); }
+  }
+
+  /* Independent rendered caps. The cap travels into the socket; its shadow
+     compresses at the same time, and a fast ring marks the completed input. */
+  .device-btn {
+    position: absolute; z-index: 6; top: 74.45%; width: 9.9%; aspect-ratio: 1;
+    transform: translateX(-50%) translateZ(17px);
+    padding: 0; border: 0; border-radius: 50%; background: none;
+    cursor: pointer; appearance: none; -webkit-tap-highlight-color: transparent;
+  }
+  .device-btn--a { left: 35.75%; }
+  .device-btn--b { left: 50.75%; }
+  .device-btn--c { left: 65.65%; }
+  .device-btn__cap {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: url("assets/aipet-button-cap-v1.png") center / contain no-repeat;
+    filter: drop-shadow(0 6px 3px rgba(18,5,5,.58));
+    transform: translateY(-3%) scale(.94);
+    transition: transform .13s cubic-bezier(.2,.85,.3,1), filter .13s ease,
+                opacity .2s ease;
+    will-change: transform, filter;
+  }
+  .device-btn::after {
+    content: ""; position: absolute; inset: -17%; z-index: -1;
+    border: 1px solid rgba(192,255,120,.72); border-radius: 50%;
+    opacity: 0; transform: scale(.64); pointer-events: none;
+  }
+  .device-btn:hover:not(:disabled) .device-btn__cap {
+    transform: translateY(-8%) scale(.985);
+    filter: drop-shadow(0 8px 5px rgba(18,5,5,.52)) brightness(1.08);
+  }
+  .device-btn:active:not(:disabled) .device-btn__cap,
+  .device-btn.pressed:not(:disabled) .device-btn__cap {
+    transform: translateY(8%) scale(.89);
+    filter: drop-shadow(0 1px 1px rgba(18,5,5,.5)) brightness(.78) saturate(.9);
+    transition-duration: .055s;
+  }
+  .device-btn.fired::after { animation: button-echo .42s cubic-bezier(.16,.7,.24,1); }
+  @keyframes button-echo {
+    0%   { opacity: .72; transform: scale(.62); }
+    100% { opacity: 0; transform: scale(1.32); }
+  }
+  .device-btn:focus-visible { outline: none; }
+  .device-btn:focus-visible .device-btn__cap {
+    filter: drop-shadow(0 6px 3px rgba(18,5,5,.58))
+            drop-shadow(0 0 7px rgba(190,255,115,.9));
+  }
+  .device-btn:disabled { cursor: default; }
+  .device-btn:disabled .device-btn__cap { filter: grayscale(.45) brightness(.7); opacity: .74; }
+  .device-btn small {
+    position: absolute; top: calc(100% + 3px); left: 50%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: clamp(6px, 1.9vw, 8px); font-weight: 400;
+    line-height: 1.05; letter-spacing: .13em; text-transform: uppercase;
+    color: rgba(20,22,24,.7); text-shadow: 0 1px 0 rgba(255,255,255,.82);
+    white-space: nowrap; pointer-events: none;
+  }
+  .device-btn small b {
+    display: block; width: fit-content; margin: 0 auto 2px;
+    font-size: clamp(8px, 2.4vw, 11px); line-height: 1; letter-spacing: 0;
+  }
+  .device-btn--b small b { padding: 1px 3px; border: 1px solid currentColor; border-radius: 2px; }
+
+  .render-model {
+    position: absolute; z-index: 4; bottom: 6.5%; left: 50%;
+    transform: translate3d(-50%, 0, 8px);
+    font-family: var(--mono); font-size: clamp(6px, 1.8vw, 8px); letter-spacing: .2em;
+    color: rgba(26,28,30,.48); text-shadow: 0 1px 0 rgba(255,255,255,.7);
+    pointer-events: none;
+  }
+  .device-led {
+    position: absolute; z-index: 7; left: 73.55%; top: 78.55%;
+    width: 3.05%; height: auto; aspect-ratio: 1; transform: translateZ(18px);
+  }
+
+  /* A faint reflection pass is alpha-masked by the chassis itself. It moves
+     across the metal, never over the transparent outside of the PNG. */
+  .render-glint {
+    position: absolute; inset: 0; z-index: 5; pointer-events: none;
+    background: linear-gradient(104deg, transparent 34%, rgba(255,255,255,.3) 48%, transparent 62%);
+    background-size: 250% 100%; background-position: -155% 0;
+    mix-blend-mode: screen; opacity: 0;
+    -webkit-mask: url("assets/aipet-device-render-v1.png") center / contain no-repeat;
+    mask: url("assets/aipet-device-render-v1.png") center / contain no-repeat;
+    animation: render-glint 8.5s cubic-bezier(.4,0,.25,1) infinite;
+  }
+  @keyframes render-glint {
+    0%, 58%  { opacity: 0; background-position: -155% 0; }
+    63%      { opacity: .42; }
+    78%      { opacity: 0; background-position: 155% 0; }
+    100%     { opacity: 0; background-position: 155% 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .device-float, .render-glint, .render-device[data-view="busy"] .render-screen,
+    .device-btn.fired::after { animation: none; }
+    .render-device, .device-btn__cap { transition: none; }
+  }
+
   /* ── under the toy ───────────────────────────────────────────────────── */
   .devicefoot {
     display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
     gap: 7px 15px; margin: 24px 0 0;
-    font-family: var(--mono); font-size: 9px; font-weight: 400; letter-spacing: .2em;
-    text-transform: uppercase; color: var(--ink-faint);
+    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: #4a4d50;
+    text-shadow: 0 1px 0 rgba(255,255,255,.72);
   }
   .devicefoot span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
   kbd {
@@ -671,6 +844,279 @@
   @media (prefers-reduced-motion: reduce) {
     .sheen::before, .led.on { animation: none; }
   }
+
+  /* ═══ APPLICATION SHELL ════════════════════════════════════════════════
+     The toy is the game now, rather than the illustration beside a long
+     document. Navigation lives in two small controls at the top edge and the
+     rest of the viewport belongs to the object. The older metal-paper styles
+     below are still used on the secondary screens. */
+  body { overflow-x: hidden; }
+  button { font: inherit; }
+
+  .app-shell { min-height: 100svh; }
+  .topbar {
+    position: fixed; z-index: 90; inset: 0 0 auto;
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: start;
+    gap: 0; margin: 0; padding: 18px clamp(16px, 3vw, 34px); pointer-events: none;
+  }
+  .nav-shell { position: relative; grid-column: 1; justify-self: start; pointer-events: auto; }
+  .menu-trigger, .wallet-mini {
+    min-height: 38px; border: 1px solid rgba(20,22,24,.35); border-radius: 999px;
+    color: #25282b; background: var(--chrome-pill);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.88), 0 7px 18px rgba(26,28,30,.18);
+    font-family: var(--mono); font-size: 9px; font-weight: 700;
+    letter-spacing: .12em; text-transform: uppercase; cursor: pointer;
+    transition: transform .16s ease, filter .16s ease, box-shadow .16s ease;
+  }
+  .menu-trigger:hover, .wallet-mini:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.05); }
+  .menu-trigger:active, .wallet-mini:active:not(:disabled) {
+    transform: translateY(1px); filter: brightness(.92);
+    box-shadow: inset 0 2px 4px rgba(35,37,40,.28), 0 3px 8px rgba(26,28,30,.14);
+  }
+  .menu-trigger { display: flex; align-items: center; gap: 10px; padding: 0 15px 0 12px; }
+  .menu-trigger__mark { width: 15px; display: grid; gap: 3px; }
+  .menu-trigger__mark i {
+    display: block; height: 1.5px; border-radius: 2px; background: #292c2f;
+    transition: transform .2s ease, width .2s ease;
+  }
+  .menu-trigger__mark i:nth-child(2) { width: 10px; }
+  .menu-trigger[aria-expanded="true"] .menu-trigger__mark i:first-child { transform: translateY(4.5px) rotate(45deg); }
+  .menu-trigger[aria-expanded="true"] .menu-trigger__mark i:nth-child(2) { width: 0; }
+  .menu-trigger[aria-expanded="true"] .menu-trigger__mark i:last-child { transform: translateY(-4.5px) rotate(-45deg); }
+
+  .menu-popover {
+    position: absolute; top: calc(100% + 10px); left: 0; width: min(290px, calc(100vw - 32px));
+    padding: 9px; border: 1px solid rgba(18,20,22,.4); border-radius: 19px;
+    background: rgba(224,222,217,.94); backdrop-filter: blur(22px) saturate(.8);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.85), 0 26px 70px rgba(23,25,27,.27);
+    transform-origin: 26px 0; animation: menu-arrive .2s cubic-bezier(.2,.8,.2,1);
+  }
+  @keyframes menu-arrive { from { opacity: 0; transform: translateY(-7px) scale(.97); } }
+  .menu-popover__label {
+    margin: 7px 11px 8px; font-family: var(--mono); font-size: 8px; font-weight: 700;
+    letter-spacing: .22em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .app-nav { display: grid; gap: 3px; }
+  .app-nav button {
+    display: grid; grid-template-columns: 26px 1fr auto; align-items: center; gap: 8px;
+    width: 100%; padding: 10px 11px; border: 0; border-radius: 11px;
+    color: var(--ink-dim); background: transparent; cursor: pointer; text-align: left;
+    font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; transition: color .15s ease, background .15s ease, transform .15s ease;
+  }
+  .app-nav button:hover { color: var(--ink); background: rgba(255,255,255,.47); transform: translateX(2px); }
+  .app-nav button[aria-current="page"] { color: var(--ink); background: rgba(17,19,21,.085); }
+  .app-nav button[aria-current="page"]::after { content: "●"; color: #5e7d31; font-size: 8px; }
+  .nav-index { font-size: 8px; letter-spacing: 0; color: var(--ink-faint); }
+  .menu-utilities {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid rgba(28,29,31,.14);
+  }
+  .menu-utilities .press { min-width: 0; padding: 8px 6px; font-size: 7.5px; }
+
+  .wallet-mini {
+    position: relative; grid-column: 3; justify-self: end; pointer-events: auto;
+    max-width: min(210px, 42vw); padding: 0 15px 0 28px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .wallet-mini::before {
+    content: ""; position: absolute; left: 13px; top: 50%; width: 6px; height: 6px;
+    border-radius: 50%; transform: translateY(-50%); background: #777a7d;
+    box-shadow: inset 0 1px 1px rgba(0,0,0,.35);
+  }
+  .wallet-mini.connected::before { background: #6db52e; box-shadow: 0 0 7px rgba(99,186,39,.8); }
+
+  .app-main { min-height: 100svh; padding: 84px clamp(18px, 4vw, 54px) 48px; }
+  .app-page { animation: page-arrive .38s cubic-bezier(.2,.75,.25,1) both; }
+  @keyframes page-arrive { from { opacity: 0; transform: translateY(8px); } }
+
+  .game-page { min-height: calc(100svh - 132px); display: grid; place-items: center; }
+  .game-layout {
+    width: min(980px, 100%); display: grid;
+    grid-template-columns: minmax(340px, 520px) minmax(220px, 270px);
+    justify-content: center; align-items: center; gap: clamp(28px, 6vw, 76px);
+  }
+  .game-device-column { min-width: 0; }
+  .game-device-column .toybox { position: static; width: 100%; max-width: 520px; margin: 0 auto; }
+  .game-device-column .device { width: 100%; }
+  .game-device-column .devicefoot { margin-top: 13px; }
+  .saidout {
+    position: absolute !important; width: 1px !important; height: 1px !important;
+    padding: 0 !important; margin: -1px !important; overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important;
+  }
+
+  .pet-hud { align-self: center; width: 100%; }
+  .pet-kicker {
+    margin: 0 0 10px; font-family: var(--mono); font-size: 8px; font-weight: 700;
+    letter-spacing: .24em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .pet-identity { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 28px; }
+  .pet-identity strong { font-family: var(--serif); font-size: clamp(27px, 4vw, 42px); font-weight: 400; line-height: 1; }
+  .pet-identity span {
+    font-family: var(--mono); font-size: 8px; font-weight: 700; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--ink-faint);
+  }
+  .mood-stack { display: grid; gap: 17px; }
+  .mood-row__top {
+    display: flex; justify-content: space-between; margin-bottom: 7px;
+    font-family: var(--mono); font-size: 8px; font-weight: 700; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--ink-dim);
+  }
+  .mood-track {
+    height: 8px; padding: 2px; border-radius: 999px; background: rgba(36,38,40,.2);
+    box-shadow: inset 0 1px 2px rgba(16,18,20,.34), 0 1px 0 rgba(255,255,255,.55);
+  }
+  .mood-fill {
+    display: block; width: 0%; height: 100%; border-radius: inherit;
+    background: linear-gradient(90deg, #343a22, #809743 63%, #b9ce65);
+    box-shadow: 0 0 8px rgba(139,174,75,.38); transition: width .7s cubic-bezier(.2,.8,.2,1);
+  }
+  .pet-hint {
+    margin: 28px 0 0; padding-top: 16px; border-top: 1px solid rgba(28,29,31,.18);
+    font-family: var(--serif); font-size: 13px; line-height: 1.45; color: var(--ink-faint);
+  }
+  .pet-hint b { color: var(--ink-dim); font-weight: 400; }
+
+  #status.console {
+    position: fixed; z-index: 75; left: 50%; bottom: 18px; width: max-content;
+    max-width: min(560px, calc(100vw - 32px)); transform: translateX(-50%);
+    margin: 0; padding: 8px 13px; border-radius: 999px;
+    color: var(--phos); background: rgba(12,13,9,.84); backdrop-filter: blur(12px);
+    box-shadow: inset 0 0 0 1px rgba(163,230,104,.12), 0 10px 30px rgba(18,20,16,.2);
+    font-family: var(--mono); font-size: 8px; line-height: 1.35; letter-spacing: .06em;
+    text-align: center; white-space: pre-line;
+  }
+  #status.console.err { color: #ffb09d; }
+  #status.console.ok { color: #baf386; }
+
+  .content-page { width: min(930px, 100%); margin: 0 auto; padding: 34px 0 70px; }
+  .page-intro { display: grid; grid-template-columns: 1fr minmax(220px, 42%); gap: 28px; align-items: end; margin-bottom: 34px; }
+  .page-intro__eyebrow {
+    margin: 0 0 10px; font-family: var(--mono); font-size: 8px; font-weight: 700;
+    letter-spacing: .24em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .page-intro h2 { margin: 0; font-family: var(--serif); font-size: clamp(40px, 8vw, 80px); font-weight: 400; line-height: .92; letter-spacing: -.035em; }
+  .page-intro > p:last-child { margin: 0; color: var(--ink-dim); font-size: 15px; line-height: 1.45; }
+  .page-intro--solo { grid-template-columns: 1fr; }
+  .page-intro--solo > div { max-width: 780px; }
+  .page-grid { display: grid; gap: 24px; }
+  .page-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .content-page .slips { display: contents; }
+  .content-page .slip { margin: 0; }
+  .setup-note {
+    display: grid; grid-template-columns: 26px 1fr; gap: 12px; align-items: start;
+    margin-bottom: 22px; padding-bottom: 20px; border-bottom: 1px solid rgba(28,29,31,.14);
+  }
+  .setup-note::before {
+    content: "01"; font-family: var(--mono); font-size: 8px; font-weight: 700;
+    letter-spacing: .1em; color: var(--ink-faint);
+  }
+  .setup-note.done::before { content: "✓"; color: #597e2e; }
+  .developer-storage { display: none !important; }
+
+  /* Community is one directory, not two unrelated reports. Feeder history is
+     attached to the pet it describes and appears as a dark LCD-like readout. */
+  .community-page .page-grid { max-width: 880px; }
+  .community-page .slip__body { padding-bottom: 42px; }
+  #directory.community-directory { position: relative; }
+  #directory.community-directory > .directory-pet {
+    position: relative; isolation: isolate; z-index: 1;
+    grid-template-columns: 24px minmax(0, 1fr) auto auto; align-items: center;
+    min-height: 56px; padding: 10px 12px; border-radius: 13px;
+    transition: z-index 0s, transform .16s ease, background .16s ease, box-shadow .16s ease;
+  }
+  #directory.community-directory > .directory-pet:hover,
+  #directory.community-directory > .directory-pet:focus-visible,
+  #directory.community-directory > .directory-pet.popover-open {
+    z-index: 12; outline: none; transform: translateX(3px);
+    background: rgba(255,255,255,.34);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.52), 0 9px 24px rgba(27,29,31,.1);
+  }
+  .directory-pet .amt::after {
+    content: " GEN"; color: var(--ink-faint); font-size: 8px; letter-spacing: .08em;
+  }
+  .pet-feeders-popover {
+    position: absolute; z-index: 30; top: calc(100% + 7px); right: 8px;
+    width: min(360px, calc(100% - 44px)); padding: 15px 17px 14px;
+    border: 1px solid rgba(184,225,119,.16); border-radius: 15px;
+    color: var(--phos); background: rgba(12,13,9,.96); backdrop-filter: blur(15px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.06), 0 18px 42px rgba(14,16,12,.38);
+    pointer-events: none; animation: feeders-arrive .18s cubic-bezier(.2,.8,.2,1) both;
+  }
+  @keyframes feeders-arrive {
+    from { opacity: 0; transform: translateY(-5px) scale(.98); }
+  }
+  .directory-pet:not(:first-child):nth-last-child(-n+2) .pet-feeders-popover {
+    top: auto; bottom: calc(100% + 7px);
+  }
+  .pet-feeders-popover__head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin: 0 0 10px; font-family: var(--mono); font-size: 8px; font-weight: 700;
+    letter-spacing: .2em; text-transform: uppercase; color: #d8ff9f;
+  }
+  .pet-feeders-popover__head span:last-child { color: var(--phos-dim); letter-spacing: .08em; }
+  .pet-feeders-popover ol { list-style: none; margin: 0; padding: 0; }
+  #directory .pet-feeders-popover li {
+    display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: baseline;
+    min-height: 0; padding: 6px 0; border-radius: 0; border-bottom: 1px dotted rgba(163,230,104,.2);
+    color: var(--phos); font-family: var(--mono); font-size: 10px;
+  }
+  #directory .pet-feeders-popover li:last-child { border-bottom: 0; }
+  .pet-feeders-popover .feeder-rank { color: var(--phos-dim); }
+  .pet-feeders-popover .feeder-amount { color: #d8ff9f; }
+  .pet-feeders-popover .feeder-empty,
+  .pet-feeders-popover .feeder-loading {
+    margin: 0; color: var(--phos-dim); font-family: var(--mono); font-size: 10px; line-height: 1.5;
+  }
+
+  /* Final overlay calibration is made against the 1237×1271 source render.
+     Labels stay proportional when the object grows or moves between layouts. */
+  /* The glass is centred at 51.5% of the source render, not at the PNG's
+     geometric midpoint: the antenna adds transparent weight on the left. */
+  .render-wordmark { top: 22.9%; left: 51.5%; }
+  .device-btn small { top: calc(100% + 1px); }
+  .render-model { bottom: 7.2%; }
+
+  @media (max-width: 820px) {
+    .game-page { align-items: start; }
+    .game-layout { grid-template-columns: minmax(0, 520px); gap: 18px; }
+    .pet-hud { width: min(430px, 100%); margin: 0 auto; }
+    .pet-identity { margin-bottom: 20px; }
+    .mood-stack { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .mood-row__top { gap: 5px; font-size: 7px; letter-spacing: .08em; }
+    .pet-hint { display: none; }
+    .page-grid.two, .page-intro { grid-template-columns: 1fr; }
+    .page-intro { gap: 16px; }
+  }
+  @media (max-width: 560px) {
+    .topbar { padding: 12px; }
+    .app-main { padding: 68px 10px 54px; }
+    .menu-trigger, .wallet-mini { min-height: 34px; }
+    .menu-trigger { padding: 0 12px 0 10px; }
+    .menu-trigger__name { display: none; }
+    .wallet-mini { max-width: 52vw; padding: 0 12px 0 25px; font-size: 7.5px; }
+    .wallet-mini::before { left: 11px; }
+    .game-layout { grid-template-columns: minmax(0, 430px); }
+    .game-device-column .devicefoot { font-size: 8px; gap: 4px 9px; }
+    .pet-hud { padding: 0 12px; }
+    .pet-identity strong { font-size: 27px; }
+    .mood-stack { gap: 7px; }
+    .mood-row__top span:first-child { overflow: hidden; text-overflow: ellipsis; }
+    .content-page { padding-top: 24px; }
+    .page-intro { padding: 0 8px; }
+    .page-intro h2 { font-size: 46px; }
+    #status.console { bottom: 10px; }
+    #directory.community-directory > .directory-pet {
+      grid-template-columns: 20px minmax(0, 1fr) auto; gap: 8px; padding-inline: 8px;
+    }
+    #directory.community-directory .acts { grid-column: 2 / -1; }
+    .pet-feeders-popover { left: 0; right: auto; width: 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .app-page, .menu-popover { animation: none; }
+    .mood-fill { transition: none; }
+  }
 </style>
 </head>
 <body>
@@ -714,213 +1160,237 @@
   </symbol>
 </svg>
 
-<div class="wrap">
+<div class="app-shell">
+  <header class="topbar">
+    <div class="nav-shell" id="navShell">
+      <button class="menu-trigger" id="menuToggle" type="button" aria-expanded="false"
+        aria-controls="appMenu" aria-label="Open navigation">
+        <span class="menu-trigger__mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="menu-trigger__name">AiPet</span>
+      </button>
 
-  <header>
-    <h1>AiPet</h1>
-    <p class="tagline">A virtual pet that lives inside a contract on <b>GenLayer</b> — it reads the
-      real weather itself, and its lines are written by an LLM running on-chain.</p>
+      <div class="menu-popover" id="appMenu" hidden>
+        <p class="menu-popover__label">Where to?</p>
+        <nav class="app-nav" aria-label="Main navigation">
+          <button type="button" data-route="play"><span class="nav-index">01</span><span>Play</span></button>
+          <button type="button" data-route="character"><span class="nav-index">02</span><span>Character</span></button>
+          <button type="button" data-route="community"><span class="nav-index">03</span><span>Community</span></button>
+          <button type="button" data-route="journal"><span class="nav-index">04</span><span>Journal</span></button>
+          <button type="button" data-route="new-pet"><span class="nav-index">05</span><span>New pet</span></button>
+        </nav>
+        <div class="menu-utilities">
+          <button class="press" id="refresh" type="button" disabled>Refresh</button>
+          <button class="press" id="share" type="button" disabled>Copy link</button>
+        </div>
+      </div>
+    </div>
+
+    <button class="wallet-mini" id="connectWallet" type="button">Connect wallet</button>
   </header>
 
-  <div class="stage">
+  <main class="app-main">
+    <section class="app-page game-page" data-page="play" aria-label="Play with your pet">
+      <div class="game-layout">
+        <div class="game-device-column">
+          <div class="toybox">
+            <div class="device" id="deviceShell">
+              <div class="device-float">
+                <div class="render-device" id="renderDevice">
+                  <img class="render-device__body" src="assets/aipet-device-render-v1.png" alt=""
+                    width="1237" height="1271" draggable="false" aria-hidden="true" fetchpriority="high" />
 
-    <!-- ── the toy ──────────────────────────────────────────────────────── -->
-    <div class="toybox">
-      <div class="device">
-        <span class="antenna" aria-hidden="true"></span>
-        <span class="strap" aria-hidden="true"></span>
+                  <div class="render-wordmark" aria-hidden="true">AiPet</div>
 
-        <div class="egg">
-          <div class="wordmark">AiPet</div>
+                  <div class="render-screen">
+                    <canvas id="lcd" width="96" height="72" aria-label="Pet screen"></canvas>
+                  </div>
 
-          <div class="bezel" data-frame="bezel">
-            <div class="glass">
-              <canvas id="lcd" width="96" height="72" aria-label="Pet screen"></canvas>
-            </div>
-          </div>
+                  <button class="device-btn device-btn--a" id="btnA" type="button" disabled
+                    aria-label="Select next action">
+                    <span class="device-btn__cap" aria-hidden="true"></span>
+                    <small><b>A</b></small>
+                  </button>
+                  <button class="device-btn device-btn--b" id="btnB" type="button" disabled
+                    aria-label="Enter or confirm">
+                    <span class="device-btn__cap" aria-hidden="true"></span>
+                    <small><b>B</b></small>
+                  </button>
+                  <button class="device-btn device-btn--c" id="btnC" type="button" disabled
+                    aria-label="Go back">
+                    <span class="device-btn__cap" aria-hidden="true"></span>
+                    <small><b>C</b></small>
+                  </button>
 
-          <div class="buttons">
-            <button class="btn" id="btnA" disabled><span class="dome"></span><small><b>A</b>select</small></button>
-            <button class="btn" id="btnB" disabled><span class="dome"></span><small><b>B</b>enter</small></button>
-            <button class="btn" id="btnC" disabled><span class="dome"></span><small><b>C</b>back</small></button>
-          </div>
-
-          <div class="underside">
-            <div class="grille" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
-            <span class="etch" id="modelTag">GEN-001</span>
-            <span class="led" id="led" title="network"></span>
-          </div>
-
-          <!-- last child on purpose: it must paint over the shell and the
-               moulded wordmark, and under everything with a z-index -->
-          <span class="sheen" aria-hidden="true"></span>
-        </div>
-      </div>
-
-      <p class="devicefoot">
-        <span><kbd>←</kbd><kbd>→</kbd> select</span>
-        <span><kbd>enter</kbd> confirm</span>
-        <span><kbd>esc</kbd> back</span>
-      </p>
-
-      <!-- read out for screen readers, and for anyone who wants the text -->
-      <p class="saidout" id="srOut" aria-live="polite"></p>
-    </div>
-
-    <!-- ── the paperwork ────────────────────────────────────────────────── -->
-    <div class="slips">
-
-      <div class="slip" data-frame="panel">
-        <div class="slip__body">
-          <h2><svg class="sigil"><use href="#sig" /></svg> Start here <em>a wallet, then a pet</em></h2>
-          <div class="hr"></div>
-
-          <ol class="steps">
-            <li class="step" id="stepWallet">
-              <span class="num"><span>1</span></span>
-              <div class="stepbody">
-                <p class="steptitle">Connect a wallet</p>
-                <p class="hint" id="walletMeta">Your wallet signs each action. It is never
-                  asked for a key, and this page never sees one.</p>
-                <button class="press hot" id="connectWallet">Connect wallet</button>
+                  <span class="render-model" id="modelTag">GEN-001</span>
+                  <span class="led device-led" id="led" title="network"></span>
+                  <span class="render-glint" aria-hidden="true"></span>
+                </div>
               </div>
-            </li>
+            </div>
 
-            <li class="step" id="stepPet">
-              <span class="num"><span>2</span></span>
-              <div class="stepbody">
-                <p class="steptitle">Hatch a pet</p>
-                <p class="hint" id="petMeta">Yours alone: a contract of its own, deployed by
-                  you, that nobody else can take away.</p>
-                <div class="field"><label for="petName">Name it</label>
-                  <input id="petName" placeholder="name it" maxlength="24" spellcheck="false" /></div>
-                <div class="field"><label for="petCity">City</label>
-                  <input id="petCity" placeholder="city" value="Lisbon" spellcheck="false" /></div>
-                <button class="press" id="hatch" disabled>Hatch it</button>
-                <p class="hint">The city is not decoration — the pet looks up that city's real
-                  weather itself, and talks about it.</p>
+            <p class="devicefoot" aria-label="Keyboard controls">
+              <span><kbd>←</kbd><kbd>→</kbd> select</span>
+              <span><kbd>enter</kbd> confirm</span>
+              <span><kbd>esc</kbd> back</span>
+            </p>
+            <p class="saidout" id="srOut" aria-live="polite"></p>
+          </div>
+        </div>
+
+        <aside class="pet-hud" aria-label="Pet condition">
+          <p class="pet-kicker">Live on-chain state</p>
+          <div class="pet-identity">
+            <strong id="petDisplayName">Waiting…</strong>
+            <span id="petStage">No pet</span>
+          </div>
+          <div class="mood-stack">
+            <div class="mood-row">
+              <div class="mood-row__top"><span>Fullness</span><span id="satietyValue">—</span></div>
+              <div class="mood-track"><span class="mood-fill" id="satietyBar"></span></div>
+            </div>
+            <div class="mood-row">
+              <div class="mood-row__top"><span>Mood</span><span id="moodValue">—</span></div>
+              <div class="mood-track"><span class="mood-fill" id="moodBar"></span></div>
+            </div>
+            <div class="mood-row">
+              <div class="mood-row__top"><span>Health</span><span id="healthValue">—</span></div>
+              <div class="mood-track"><span class="mood-fill" id="healthBar"></span></div>
+            </div>
+          </div>
+          <p class="pet-hint"><b>A</b> chooses an action, <b>B</b> opens or confirms it,
+            and <b>C</b> returns home. The keyboard works the same way.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="app-page content-page" data-page="character" hidden>
+      <div class="page-intro">
+        <div><p class="page-intro__eyebrow">What living changed</p><h2>Character</h2></div>
+        <p>The traits that have grown from what this pet has actually experienced — and the voice they produce.</p>
+      </div>
+      <div class="page-grid two">
+        <div class="slip" data-frame="panel" id="charBox" hidden>
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Character <em>what living added</em></h2>
+            <div class="hr"></div>
+            <p class="voice" id="charVoice"></p>
+            <ul class="traits" id="traits"></ul>
+            <div class="traitcard" id="traitCard" hidden></div>
+            <p class="hint" id="charHint"></p>
+            <div class="row" id="charControls" hidden style="margin-top:14px">
+              <button class="press" id="freeze">Freeze</button>
+              <button class="press" id="forget">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel" id="ownerBox" hidden>
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Owner <em>the food money</em></h2>
+            <div class="hr"></div>
+            <div class="kv"><span>held by the contract</span><b id="balMeta">— GEN</b></div>
+            <label class="stack" for="wdAmt">Withdraw</label>
+            <div class="row">
+              <div class="field"><input id="wdAmt" type="number" min="0" step="0.01" value="0.1" /></div>
+              <button class="press slim" id="withdraw">Take it</button>
+            </div>
+            <p class="hint">The payout settles when the transaction <b>finalizes</b> — about half an
+              hour on Bradbury. The balance stays put until then.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-page content-page community-page" data-page="community" hidden>
+      <div class="page-intro">
+        <div><p class="page-intro__eyebrow">The shared world</p><h2>Community</h2></div>
+        <p>Meet every pet living on the shared board. Hover over one to see who has kept it fed.</p>
+      </div>
+      <div class="page-grid">
+        <div class="slip" data-frame="panel" id="dirBox" hidden>
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Every pet <em>hover to see who fed them</em></h2>
+            <div class="hr"></div>
+            <p class="hint" style="margin-top:0">Visit sends your pet round to say hello. Feed
+              puts a meal directly into a stranger's pet. Focus or tap a row on touch devices.</p>
+            <p class="hint" id="dirMeta"></p>
+            <ol class="board community-directory" id="directory" style="margin-top:10px"></ol>
+            <button class="press" id="joinDir" style="margin-top:14px" disabled>Add my pet to this board</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-page content-page" data-page="journal" hidden>
+      <div class="page-intro page-intro--solo">
+        <div><p class="page-intro__eyebrow">A memory that belongs to the pet</p><h2>What your pet has said</h2></div>
+      </div>
+      <div class="page-grid">
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Journal <em>newest first</em></h2>
+            <div class="hr"></div>
+            <ul class="feed" id="history"><li class="empty">nothing yet</li></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-page content-page" data-page="new-pet" hidden>
+      <div class="page-intro">
+        <div><p class="page-intro__eyebrow">A new on-chain life</p><h2>Hatch a pet</h2></div>
+        <p>Name it, choose the city whose real weather it will watch, and deploy its own contract.</p>
+      </div>
+      <div class="page-grid">
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <div class="setup-note" id="stepWallet">
+              <div>
+                <p class="steptitle" style="margin-top:0">Connect a wallet from the top-right control</p>
+                <p class="hint" id="walletMeta">Your wallet signs each action. This page never sees its key.</p>
               </div>
-            </li>
-          </ol>
-
-          <div id="status" class="console">Loading…</div>
-          <div class="row" style="margin-top:14px">
-            <button class="press" id="refresh" disabled>Refresh</button>
-            <button class="press" id="share" disabled>Copy link</button>
+            </div>
+            <ol class="steps">
+              <li class="step" id="stepPet">
+                <span class="num"><span>2</span></span>
+                <div class="stepbody">
+                  <p class="steptitle">Give it a beginning</p>
+                  <p class="hint" id="petMeta">Yours alone: a contract of its own, deployed by you.</p>
+                  <div class="field"><label for="petName">Name it</label>
+                    <input id="petName" placeholder="name it" maxlength="24" spellcheck="false" /></div>
+                  <div class="field"><label for="petCity">City</label>
+                    <input id="petCity" placeholder="city" value="Lisbon" spellcheck="false" /></div>
+                  <button class="press hot" id="hatch" disabled>Hatch it</button>
+                  <p class="hint">The city is not decoration — the pet reads its real weather and talks about it.</p>
+                </div>
+              </li>
+            </ol>
           </div>
         </div>
       </div>
+    </section>
 
-      <div class="slip" data-frame="panel" id="charBox" hidden>
-        <div class="slip__body">
-          <h2><svg class="sigil"><use href="#sig" /></svg> Character <em>what living added</em></h2>
-          <div class="hr"></div>
-          <p class="voice" id="charVoice"></p>
-          <ul class="traits" id="traits"></ul>
-          <div class="traitcard" id="traitCard" hidden></div>
-          <p class="hint" id="charHint"></p>
-          <div class="row" id="charControls" hidden style="margin-top:14px">
-            <button class="press" id="freeze">Freeze</button>
-            <button class="press" id="forget">Reset</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="slip" data-frame="panel" id="ownerBox" hidden>
-        <div class="slip__body">
-          <h2><svg class="sigil"><use href="#sig" /></svg> Owner <em>the food money</em></h2>
-          <div class="hr"></div>
-          <div class="kv"><span>held by the contract</span><b id="balMeta">— GEN</b></div>
-          <label class="stack" for="wdAmt">Withdraw</label>
-          <div class="row">
-            <div class="field"><input id="wdAmt" type="number" min="0" step="0.01" value="0.1" /></div>
-            <button class="press slim" id="withdraw">Take it</button>
-          </div>
-          <p class="hint">The payout settles when the transaction <b>finalizes</b> — about half an
-            hour on Bradbury. The balance stays put until then; that is not a failure.</p>
-        </div>
-      </div>
-
-      <div class="slip" data-frame="panel">
-        <div class="slip__body">
-          <h2><svg class="sigil"><use href="#sig" /></svg> Fed by <em>who kept it alive</em></h2>
-          <div class="hr"></div>
-          <p class="hint" style="margin-top:0">Anyone can feed this pet — it does not have to be
-            you. The GEN a stranger sends buys real satiety and then <b>stays in the pet's
-            contract</b>, where only the owner can withdraw it. Send someone the link and they
-            can keep it alive while you are away.</p>
-          <ol class="board" id="board" style="margin-top:12px"><li class="empty">nobody has fed the pet yet</li></ol>
-          <button class="press" id="shareFeed" style="margin-top:14px" disabled>Copy a link people can feed it from</button>
-        </div>
-      </div>
-
-      <!-- The shared board loads itself from a directory this page already knows
-           about, so a cross-contract leaderboard needs no address typed in. -->
-      <div class="slip" data-frame="panel" id="dirBox" hidden>
-        <div class="slip__body">
-          <h2><svg class="sigil"><use href="#sig" /></svg> Every pet <em>who else is out there</em></h2>
-          <div class="hr"></div>
-          <p class="hint" style="margin-top:0">Every pet anyone has put on the shared board, with
-            what it has been fed. <b>Visit</b> sends your pet round to say hello — it reads that
-            contract and its line is delivered there. <b>Feed</b> puts a meal in a stranger's pet.</p>
-          <p class="hint" id="dirMeta"></p>
-          <ol class="board" id="directory" style="margin-top:10px"></ol>
-          <button class="press" id="joinDir" style="margin-top:14px" disabled>Add my pet to this board</button>
-        </div>
-      </div>
-
-      <div class="slip" data-frame="panel">
-        <div class="slip__body">
-          <h2><svg class="sigil"><use href="#sig" /></svg> Everything it has said</h2>
-          <div class="hr"></div>
-          <ul class="feed" id="history"><li class="empty">nothing yet</li></ul>
-        </div>
-      </div>
-
-      <div class="slip" data-frame="panel">
-        <div class="slip__body">
-          <details class="more">
-            <summary>For developers</summary>
-
-            <p class="hint" style="margin-top:0">Nothing here is needed to play. It is here to
-              point the page at a different pet, a different network, or a different board.</p>
-
-            <label class="stack" for="net">Network</label>
-            <div class="field">
-              <select id="net">
-                <option value="testnetBradbury">Testnet Bradbury</option>
-                <option value="studionet">Studio (hosted)</option>
-                <option value="localnet">Localnet (localhost:4000)</option>
-              </select>
-            </div>
-
-            <label class="stack" for="addr">Watch any pet</label>
-            <div class="row">
-              <div class="field"><input id="addr" placeholder="0x…" spellcheck="false" /></div>
-              <button class="press slim" id="connect">Open</button>
-            </div>
-
-            <label class="stack" for="factoryAddr">Directory contract</label>
-            <div class="row">
-              <div class="field"><input id="factoryAddr" placeholder="0x…" spellcheck="false" /></div>
-              <button class="press slim" id="loadDir">Load</button>
-            </div>
-
-            <p class="subhead">Signing without a wallet</p>
-            <p class="hint" style="margin-top:0">For headless testing, or a browser with no
-              wallet extension. A key typed into a web page is a key you must treat as
-              burnt — use a throwaway one, funded from the faucet, and nothing else.</p>
-            <div class="row">
-              <div class="field"><input id="pk" placeholder="0x… burner key" spellcheck="false" /></div>
-              <button class="press slim" id="gen">New</button>
-            </div>
-            <button class="press" id="useKey" style="margin-top:12px">Sign with this key</button>
-          </details>
-        </div>
-      </div>
-
+    <!-- Kept for local debugging and compatibility with the current chain
+         client, but deliberately absent from the player-facing interface. -->
+    <div class="developer-storage" aria-hidden="true">
+      <ol id="board"><li>nobody has fed the pet yet</li></ol>
+      <button id="shareFeed" type="button" tabindex="-1">Copy feeding link</button>
+      <select id="net" tabindex="-1">
+        <option value="testnetBradbury">Testnet Bradbury</option>
+        <option value="studionet">Studio (hosted)</option>
+        <option value="localnet">Localnet (localhost:4000)</option>
+      </select>
+      <input id="addr" tabindex="-1" />
+      <button id="connect" type="button" tabindex="-1">Open</button>
+      <input id="factoryAddr" tabindex="-1" />
+      <button id="loadDir" type="button" tabindex="-1">Load</button>
+      <input id="pk" tabindex="-1" />
+      <button id="gen" type="button" tabindex="-1">New</button>
+      <button id="useKey" type="button" tabindex="-1">Use key</button>
     </div>
-  </div>
+  </main>
+
+  <div id="status" class="console">Loading…</div>
 </div>
 
 <script type="module">
@@ -1330,6 +1800,84 @@ function revertReason(err) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const $ = (id) => document.getElementById(id);
+
+// ── the application shell ────────────────────────────────────────────────
+// Hash routes keep the app deployable as one static file and, importantly,
+// keep the pet address in the query string. A shared link can therefore open
+// the same contract while the back button still behaves like navigation.
+const ROUTES = new Set(["play", "character", "community", "journal", "new-pet"]);
+const routeFromHash = () => {
+  const candidate = location.hash.slice(1);
+  return ROUTES.has(candidate) ? candidate : "play";
+};
+let currentRoute = routeFromHash();
+
+function closeAppMenu() {
+  $("appMenu").hidden = true;
+  $("menuToggle").setAttribute("aria-expanded", "false");
+}
+
+function activateRoute(route, { replace = false } = {}) {
+  currentRoute = ROUTES.has(route) ? route : "play";
+  document.querySelectorAll("[data-page]").forEach((page) => {
+    page.hidden = page.dataset.page !== currentRoute;
+  });
+  document.querySelectorAll("[data-route]").forEach((button) => {
+    if (button.dataset.route === currentRoute) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  const next = `${location.pathname}${location.search}#${currentRoute}`;
+  if (replace) history.replaceState(null, "", next);
+  else if (location.hash !== `#${currentRoute}`) history.pushState(null, "", next);
+  closeAppMenu();
+  window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+$("menuToggle").addEventListener("click", () => {
+  const opening = $("appMenu").hidden;
+  $("appMenu").hidden = !opening;
+  $("menuToggle").setAttribute("aria-expanded", String(opening));
+});
+document.querySelectorAll("[data-route]").forEach((button) => {
+  button.addEventListener("click", () => activateRoute(button.dataset.route));
+});
+document.addEventListener("pointerdown", (event) => {
+  if (!$("navShell").contains(event.target)) closeAppMenu();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || $("appMenu").hidden) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  closeAppMenu();
+  $("menuToggle").focus();
+}, true);
+window.addEventListener("hashchange", () => activateRoute(routeFromHash()));
+activateRoute(currentRoute, { replace: !location.hash });
+
+const deviceShell = $("deviceShell");
+const deviceVisual = $("renderDevice");
+const canTiltDevice = window.matchMedia("(hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference)");
+let tiltRaf = 0;
+
+// A few degrees are enough for the render's reflections to feel attached to a
+// real object. Pointer motion never owns the transform outright — it only sets
+// variables, leaving the ambient float and button travel on separate layers.
+deviceShell.addEventListener("pointermove", (e) => {
+  if (!canTiltDevice.matches) return;
+  cancelAnimationFrame(tiltRaf);
+  tiltRaf = requestAnimationFrame(() => {
+    const r = deviceShell.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width - .5;
+    const y = (e.clientY - r.top) / r.height - .5;
+    deviceVisual.style.setProperty("--tilt-x", `${(-y * 3.2).toFixed(2)}deg`);
+    deviceVisual.style.setProperty("--tilt-y", `${(x * 4.2).toFixed(2)}deg`);
+  });
+});
+deviceShell.addEventListener("pointerleave", () => {
+  deviceVisual.style.setProperty("--tilt-x", "0deg");
+  deviceVisual.style.setProperty("--tilt-y", "0deg");
+});
+
 const LS = {
   get a(){ return localStorage.getItem("aipet_addr") || ""; }, set a(v){ localStorage.setItem("aipet_addr", v); },
   get k(){ return localStorage.getItem("aipet_pk") || ""; },   set k(v){ localStorage.setItem("aipet_pk", v); },
@@ -1421,7 +1969,7 @@ function refreshShareLink() {
   const q = new URLSearchParams({ pet: address, net: $("net").value });
   const dir = $("factoryAddr").value.trim();
   if (/^0x[0-9a-fA-F]{40}$/.test(dir)) q.set("dir", dir);
-  history.replaceState(null, "", `${location.pathname}?${q}`);
+  history.replaceState(null, "", `${location.pathname}?${q}#${currentRoute}`);
 }
 
 // ── the menu the device actually offers ───────────────────────────────────
@@ -1465,7 +2013,27 @@ function spriteFor() {
   return "adult";
 }
 
+function setHudMeter(name, rawValue) {
+  const hasValue = rawValue !== null && rawValue !== undefined && rawValue !== "";
+  const value = hasValue ? Math.max(0, Math.min(100, Number(rawValue) || 0)) : 0;
+  $(`${name}Bar`).style.width = `${value}%`;
+  $(`${name}Value`).textContent = hasValue ? `${Math.round(value)}%` : "—";
+}
+
+function renderPetHud() {
+  $("petDisplayName").textContent = pet?.name || (address ? "Reading…" : "No pet yet");
+  $("petStage").textContent = pet
+    ? `${String(pet.stage || "pet")} · ${Number(pet.age_days || 0)}d`
+    : "No pet";
+  setHudMeter("satiety", pet?.satiety);
+  setHudMeter("mood", pet?.mood);
+  setHudMeter("health", pet?.health);
+}
+
 function render() {
+  renderPetHud();
+  deviceVisual.dataset.view = ui.view;
+  deviceVisual.dataset.alive = String(alive);
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = INK;
 
@@ -1624,8 +2192,11 @@ function beep(freq = 660, ms = 45) {
 
 function flash(btn) {
   const el = $(btn);
-  el.classList.add("pressed");
-  setTimeout(() => el.classList.remove("pressed"), 90);
+  el.classList.remove("fired");
+  void el.offsetWidth;                         // restart the light echo
+  el.classList.add("pressed", "fired");
+  setTimeout(() => el.classList.remove("pressed"), 115);
+  setTimeout(() => el.classList.remove("fired"), 430);
 }
 
 function pressA() {                              // cycle the menu
@@ -2045,7 +2616,11 @@ $("shareFeed").onclick = copyShareLink;
 function paintSteps() {
   $("stepWallet").classList.toggle("done", !!signerAddress);
   $("stepPet").classList.toggle("done", !!address);
-  $("connectWallet").textContent = signerAddress ? "Use a different wallet" : "Connect wallet";
+  $("connectWallet").textContent = signerAddress ? short(signerAddress) : "Connect wallet";
+  $("connectWallet").classList.toggle("connected", !!signerAddress);
+  $("connectWallet").setAttribute("aria-label", signerAddress
+    ? `Connected wallet ${signerAddress}. Choose a different wallet`
+    : "Connect wallet");
   $("hatch").textContent = address ? "Hatch another" : "Hatch it";
   $("hatch").disabled = busy || !signerAddress;
   $("petMeta").textContent = address
@@ -2430,6 +3005,7 @@ $("traits").addEventListener("keydown", (e) => {
 const DEFAULT_DIRECTORY = {
   testnetBradbury: "0x9634498635CBf923a390862e249c7b880e0bB7be",
 };
+const feederCache = new Map();
 let factoryAddress = $("factoryAddr").value.trim()
   || localStorage.getItem("aipet_factory")
   || DEFAULT_DIRECTORY[$("net").value] || "";
@@ -2445,6 +3021,85 @@ $("joinDir").onclick = async () => {
   await loadDirectory({});
 };
 
+function feederRowsHtml(rows) {
+  if (!rows.length) return `<p class="feeder-empty">Nobody has fed this pet yet.</p>`;
+  return `<ol>` + rows.map((feeder, index) =>
+    `<li><span class="feeder-rank">${index + 1}</span>`
+    + `<span>${escapeHtml(short(feeder.address))}</span>`
+    + `<span class="feeder-amount">${fromWei(feeder.wei).toFixed(3)} GEN</span></li>`
+  ).join("") + `</ol>`;
+}
+
+async function loadPetFeeders(row) {
+  const target = row.dataset.petAddress;
+  const cacheKey = target.toLowerCase();
+  const body = row.querySelector("[data-feeder-body]");
+  const count = row.querySelector("[data-feeder-count]");
+  const cached = feederCache.get(cacheKey);
+  if (cached) {
+    body.innerHTML = feederRowsHtml(cached);
+    count.textContent = `${cached.length} feeder${cached.length === 1 ? "" : "s"}`;
+    return;
+  }
+  if (!client) {
+    body.innerHTML = `<p class="feeder-empty">Network unavailable.</p>`;
+    count.textContent = "offline";
+    return;
+  }
+  body.innerHTML = `<p class="feeder-loading">Reading this pet's contract…</p>`;
+  count.textContent = "loading";
+  try {
+    const result = await client.readContract({
+      address: target, functionName: "get_top_feeders", args: [BOARD_LIMIT],
+    });
+    const rows = Array.isArray(result) ? result : [];
+    feederCache.set(cacheKey, rows);
+    if (!row.isConnected) return;
+    body.innerHTML = feederRowsHtml(rows);
+    count.textContent = `${rows.length} feeder${rows.length === 1 ? "" : "s"}`;
+  } catch {
+    if (!row.isConnected) return;
+    body.innerHTML = `<p class="feeder-empty">Could not read feeder history.</p>`;
+    count.textContent = "unavailable";
+  }
+}
+
+function hidePetFeeders(row) {
+  row?.classList.remove("popover-open");
+  const popover = row?.querySelector(".pet-feeders-popover");
+  if (popover) popover.hidden = true;
+}
+
+function showPetFeeders(row) {
+  $("directory").querySelectorAll(".directory-pet.popover-open").forEach((openRow) => {
+    if (openRow !== row) hidePetFeeders(openRow);
+  });
+  row.classList.add("popover-open");
+  row.querySelector(".pet-feeders-popover").hidden = false;
+  loadPetFeeders(row);
+}
+
+$("directory").addEventListener("pointerover", (event) => {
+  const row = event.target.closest(".directory-pet");
+  if (row && !row.contains(event.relatedTarget)) showPetFeeders(row);
+});
+$("directory").addEventListener("pointerout", (event) => {
+  const row = event.target.closest(".directory-pet");
+  if (row && !row.contains(event.relatedTarget) && !row.contains(document.activeElement)) hidePetFeeders(row);
+});
+$("directory").addEventListener("focusin", (event) => {
+  const row = event.target.closest(".directory-pet");
+  if (row) showPetFeeders(row);
+});
+$("directory").addEventListener("focusout", (event) => {
+  const row = event.target.closest(".directory-pet");
+  if (row && !row.contains(event.relatedTarget)) hidePetFeeders(row);
+});
+document.addEventListener("pointerdown", (event) => {
+  if (event.target.closest(".directory-pet")) return;
+  $("directory").querySelectorAll(".directory-pet.popover-open").forEach(hidePetFeeders);
+});
+
 // ── acting on somebody else's pet ─────────────────────────────────────────
 //
 // Both of these are the reason the board exists. Without them it is a table of
@@ -2452,7 +3107,12 @@ $("joinDir").onclick = async () => {
 // another pet was to paste its address into a field two panels away.
 $("directory").addEventListener("click", async (e) => {
   const btn = e.target.closest("button[data-act]");
-  if (!btn || busy) return;
+  if (!btn) {
+    const row = e.target.closest(".directory-pet");
+    if (row) showPetFeeders(row);
+    return;
+  }
+  if (busy) return;
   const target = btn.dataset.addr;
 
   if (btn.dataset.act === "visit") {
@@ -2475,6 +3135,7 @@ $("directory").addEventListener("click", async (e) => {
   });
   if (ok) setStatus(`Fed ${short(target)} ✓ — ${feedGen()} GEN and +${PORTIONS[portion].food} `
     + "satiety. You are on that pet's board now; the GEN belongs to its owner.", "ok");
+  if (ok) feederCache.delete(target.toLowerCase());
   await loadDirectory({});
 });
 
@@ -2500,6 +3161,8 @@ async function loadDirectory({ announce }) {
     $("directory").innerHTML = rows.length
       ? rows.map((r, i) => {
           const mine = r.address.toLowerCase() === me;
+          const totalFed = fromWei(r.total_fed_wei).toFixed(3);
+          const popoverId = `pet-feeders-${i}`;
           // Nobody visits or feeds their own pet from here — the device does
           // that. A dead pet cannot be fed either; feed() reverts on one, and
           // finding that out from a rejected transaction is a bad way to learn.
@@ -2510,11 +3173,17 @@ async function loadDirectory({ announce }) {
               + `<button data-act="feed" data-addr="${escapeHtml(r.address)}"`
               + `${r.alive && signerAddress ? "" : " disabled"} title="put a meal in this pet">feed</button>`
               + `</span>`;
-          return `<li><span class="rank">${i + 1}</span>`
+          return `<li class="directory-pet" tabindex="0" data-pet-address="${escapeHtml(r.address)}"`
+            + ` aria-describedby="${popoverId}" aria-label="${escapeHtml(r.name)}, ${escapeHtml(short(r.address))}, ${totalFed} GEN fed">`
+            + `<span class="rank">${i + 1}</span>`
             + `<span class="who${mine ? " me" : ""}">${escapeHtml(r.name)} `
             + `${escapeHtml(short(r.address))}`
             + `${r.alive ? "" : ` <span class="dead-mark">✝</span>`}</span>`
-            + `<span class="amt">${fromWei(r.total_fed_wei).toFixed(3)}</span>${acts}</li>`;
+            + `<span class="amt">${totalFed}</span>${acts}`
+            + `<aside class="pet-feeders-popover" id="${popoverId}" role="tooltip" hidden>`
+            + `<p class="pet-feeders-popover__head"><span>Fed by</span><span data-feeder-count>hover to load</span></p>`
+            + `<div data-feeder-body><p class="feeder-loading">Reading this pet's contract…</p></div>`
+            + `</aside></li>`;
         }).join("")
       : `<li class="empty">no pets registered yet</li>`;
     const listed = rows.some(r => r.address.toLowerCase() === me);

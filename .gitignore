@@ -24,4 +24,4 @@ frontend/ai_pet.py
 .claude/
 # design reference images (mood board for the liquid-chrome redesign) — 5 MB of
 # inputs to the work, not part of the site. Nothing in frontend/ references them.
-assets/
+/assets/
