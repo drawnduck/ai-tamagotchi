@@ -152,6 +152,10 @@ def test_initial_state(direct_deploy):
     assert s["last_quote"] == ""
     assert s["allow_public_feed"] is True
     assert int(s["total_fed_wei"]) == 0
+    # the till starts empty, so there is nothing to reserve and nothing spent
+    assert s["withdrawable_wei"] == "0"
+    assert s["burned_wei"] == "0"
+    assert s["till_revive_ready"] is False
     assert pet.get_history() == []
 
 
@@ -1375,8 +1379,360 @@ def test_contract_balance_tracks_funding(direct_vm, direct_deploy, direct_owner)
     assert pet.get_balance() == "0"
     _fund_contract(direct_vm, 4 * GEN)
     assert pet.get_balance() == str(4 * GEN)
-    # the guards pass at exactly the balance; the transfer itself is a no-op here
+    # the guards pass at exactly the balance; the transfer itself is a no-op here.
+    # No reserve applies: nobody has ever fed this pet (total_fed == 0), so it
+    # made no promise to keep a revive in the box — see _withdrawable.
     pet.withdraw(4 * GEN)
+
+
+# ------------------------------- the till -----------------------------------
+#
+# Once anyone has fed the pet, REVIVE_COST stays behind as the next revive, and
+# a dead pet whose community has fed it at least that much can be brought back
+# with value == 0. That GEN is then LOCKED: burned_wei rises and is subtracted
+# from every figure the contract reports, for good. Nothing is transferred
+# anywhere — see _effective_balance for why subtraction beats a burn transfer.
+#
+# TWO DIRECT-MODE FACTS THESE TESTS ARE BUILT AROUND, both measured, not assumed:
+#
+# 1. gl.message.value does NOT credit self.balance here. feed()/revive() move
+#    total_fed and the leaderboard; only deal() moves the balance. On chain the
+#    two rise together, so every test below sets them independently and on
+#    purpose. Do not "fix" a test by deleting its _fund_contract call.
+# 2. The outgoing transfer in withdraw() is a silent no-op (see the block above),
+#    which is exactly why a till-revive must not depend on one. burned_wei is
+#    storage, so it is just as real here as it is on chain.
+
+
+CAP_IDLE_H = 400          # past DECAY_BILL_CAP: kills a pet however well fed
+
+
+def _fed_pet(direct_vm, direct_deploy, fed_wei, held_wei):
+    """A LIVING pet fed `fed_wei`, with `held_wei` sitting in the till.
+
+    feed() speaks, so it needs a mock; the mock is cleared on the way out so a
+    caller's own stacked mock still wins.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Yum.", "mood_delta": 0}))
+    _feed(pet, direct_vm, fed_wei)
+    direct_vm.clear_mocks()
+    _fund_contract(direct_vm, held_wei)
+    return pet
+
+
+def _starve_to_death(direct_vm, pet, at_h=CAP_IDLE_H):
+    """Neglect a pet to death, whatever state it was in.
+
+    CAP_IDLE_H is past DECAY_BILL_CAP on purpose: a pet fed to satiety 100
+    outlives LETHAL_IDLE_H, and the cap path kills regardless of the meters, so
+    one number works for a full pet and an empty one alike. A dead pet does not
+    speak, so this needs no mock — pet() returns the stored quote and stops.
+
+    `at_h` is an ABSOLUTE hour from the suite's fixed base, because warp_hours
+    is absolute and not a step: a test that kills a pet twice has to name a
+    later hour for the second death or no time passes at all and the pet lives,
+    reaches the LLM and fails on a missing mock rather than on its own claim.
+    """
+    warp_hours(direct_vm, at_h)
+    pet.pet()
+    assert pet.get_state()["alive"] is False
+
+
+def _fed_and_dead(direct_vm, direct_deploy, fed_wei, held_wei):
+    """A dead pet fed `fed_wei`, with `held_wei` in the till. The till case."""
+    pet = _fed_pet(direct_vm, direct_deploy, fed_wei, held_wei)
+    _starve_to_death(direct_vm, pet)
+    return pet
+
+
+def _till_revive(direct_vm, pet, quote="Back on the house."):
+    """revive() with value 0 — the till pays. It still speaks, so it still mocks."""
+    direct_vm.mock_llm(r".*", json.dumps({"quote": quote, "mood_delta": 0}))
+    direct_vm.value = 0
+    said = pet.revive()
+    direct_vm.clear_mocks()
+    return said
+
+
+def test_owner_cannot_withdraw_the_reserve(direct_vm, direct_deploy, direct_owner):
+    """One GEN of a fed pet's till belongs to its next death, not to the owner."""
+    direct_vm.sender = direct_owner
+    pet = _fed_pet(direct_vm, direct_deploy, GEN // 10, 2 * GEN)
+    assert pet.get_state()["withdrawable_wei"] == str(GEN)
+    with direct_vm.expect_revert("revive reserve"):
+        pet.withdraw(2 * GEN)
+    # ...but everything above the reserve is still the owner's
+    pet.withdraw(GEN)
+
+
+def test_never_fed_pet_can_withdraw_dust(direct_vm, direct_deploy, direct_owner):
+    """No food, no promise: a private pet's dust is the owner's to sweep up."""
+    direct_vm.sender = direct_owner
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    _fund_contract(direct_vm, 3 * 10 ** 17)          # 0.3 GEN, well under the reserve
+    assert pet.get_state()["withdrawable_wei"] == str(3 * 10 ** 17)
+    pet.withdraw(3 * 10 ** 17)
+
+
+def test_dust_below_REVIVE_COST_is_stuck_when_total_fed_positive(
+    direct_vm, direct_deploy, direct_owner
+):
+    """0 < effective < REVIVE_COST with food behind it is stuck ON PURPOSE.
+
+    Too little to withdraw, too little to revive with, and it comes unstuck only
+    when more food arrives. This is the case a client has to explain out loud:
+    a withdrawable of zero beside a non-zero balance reads as a broken till.
+    """
+    direct_vm.sender = direct_owner
+    pet = _fed_pet(direct_vm, direct_deploy, GEN // 10, 5 * 10 ** 17)
+    s = pet.get_state()
+    assert pet.get_balance() == str(5 * 10 ** 17)     # the money is visibly there
+    assert s["withdrawable_wei"] == "0"               # ...and none of it is takeable
+    with direct_vm.expect_revert("revive reserve"):
+        pet.withdraw(1)
+    _starve_to_death(direct_vm, pet)
+    # and it cannot buy a revive either — the till is short of a whole REVIVE_COST
+    assert pet.get_state()["till_revive_ready"] is False
+
+
+def test_half_gen_total_fed_cannot_till_revive(direct_vm, direct_deploy):
+    """A full box is not enough: the FOOD has to reach REVIVE_COST as well.
+
+    Guard 3 reads total_fed, not the balance, so a pet the community only ever
+    fed 0.5 GEN can never till-revive however much GEN is sitting on it.
+    """
+    pet = _fed_and_dead(direct_vm, direct_deploy, 5 * 10 ** 17, 5 * GEN)
+    s = pet.get_state()
+    assert s["till_revive_ready"] is False
+    assert int(s["total_fed_wei"]) == 5 * 10 ** 17
+    direct_vm.value = 0
+    with direct_vm.expect_revert("revive costs at least 1 GEN"):
+        pet.revive()
+    assert pet.get_state()["alive"] is False
+
+
+def test_revive_from_till_when_value_is_zero(direct_vm, direct_deploy):
+    """The community's own food pays for the death it caused.
+
+    from_till travels in the PetRevived blob, which direct mode cannot capture
+    (there is no event sink here). What IS assertable is the whole behavioural
+    signature of that path: the pet is back, the money is locked, and total_fed
+    did not move — no free food out of a payment that was never made.
+    """
+    pet = _fed_and_dead(direct_vm, direct_deploy, GEN, GEN)
+    assert pet.get_state()["till_revive_ready"] is True
+    said = _till_revive(direct_vm, pet)
+
+    s = pet.get_state()
+    assert said == "Back on the house."
+    assert s["alive"] is True
+    assert int(s["revives"]) == 1
+    assert (int(s["health"]), int(s["satiety"]), int(s["mood"])) == (
+        REVIVE_HEALTH, REVIVE_SATIETY, REVIVE_MOOD)
+    assert s["burned_wei"] == str(GEN)               # the GEN is locked away
+    assert int(s["total_fed_wei"]) == GEN            # ...and it was NOT new food
+    # The raw balance deliberately does not move — nothing is transferred
+    # anywhere. What fell is the effective balance, and with it withdrawable.
+    assert pet.get_balance() == str(GEN)
+    assert s["withdrawable_wei"] == "0"
+
+
+def test_revive_from_till_does_not_double_count_total_fed(direct_vm, direct_deploy):
+    """Spending the till is not feeding the pet. total_fed is lifetime FOOD."""
+    pet = _fed_and_dead(direct_vm, direct_deploy, GEN, 2 * GEN)
+    before = int(pet.get_state()["total_fed_wei"])
+    _till_revive(direct_vm, pet)
+    assert int(pet.get_state()["total_fed_wei"]) == before == GEN
+
+
+def test_stranger_cannot_drain_till_by_reviving(
+    direct_vm, direct_deploy, direct_owner, direct_alice
+):
+    """A passer-by may spend the till, but never into their own pocket.
+
+    This is why the till LOCKS the GEN instead of paying it to whoever calls:
+    "reward the reviver" turns a community pet into a faucet a stranger drains
+    by grief-reviving it. Nobody is credited either — you cannot buy a place on
+    the leaderboard with money that was already in the box.
+    """
+    direct_vm.sender = direct_owner
+    pet = _fed_and_dead(direct_vm, direct_deploy, GEN, 2 * GEN)
+    direct_vm.sender = direct_alice
+    _till_revive(direct_vm, pet)
+    direct_vm.sender = direct_owner
+
+    s = pet.get_state()
+    assert s["alive"] is True
+    assert s["burned_wei"] == str(GEN)
+    board = pet.get_top_feeders(0)
+    assert [r["address"].lower() for r in board] == [to_hex(direct_owner).lower()]
+    assert board[0]["wei"] == str(GEN)               # alice bought nothing
+    # the effective till fell by exactly REVIVE_COST and by nothing else
+    assert s["withdrawable_wei"] == "0"              # 2 GEN - 1 burned - 1 reserved
+    assert pet.get_balance() == str(2 * GEN)
+
+
+def test_till_revive_second_time_without_new_food_reverts(direct_vm, direct_deploy):
+    """One death, one till-revive. The next one waits for the next meal.
+
+    Asserted on the CREDIT (guard 3) and on burned_wei, never on get_balance():
+    the balance does not move on a till-revive at all, and on chain an outgoing
+    transfer would not move it until finalization either. A guard that depended
+    on the balance would hand out the same GEN twice inside that window.
+    """
+    pet = _fed_and_dead(direct_vm, direct_deploy, GEN, 2 * GEN)
+    _till_revive(direct_vm, pet)
+    _starve_to_death(direct_vm, pet, 2 * CAP_IDLE_H)
+
+    s = pet.get_state()
+    assert s["till_revive_ready"] is False
+    assert s["burned_wei"] == str(GEN)               # still one burn, not two
+    direct_vm.value = 0
+    with direct_vm.expect_revert("revive costs at least 1 GEN"):
+        pet.revive()
+    assert pet.get_state()["burned_wei"] == str(GEN)
+
+
+def test_a_full_till_still_needs_new_food_for_a_second_till_revive(
+    direct_vm, direct_deploy
+):
+    """A 5 GEN till does not buy five free deaths — the hole burned_wei alone leaves.
+
+    Subtracting the burn is what closes the demo loop inside the finalization
+    window, but on its own it only rations by SIZE: a fat till would still pay
+    for death after death while the community that filled it fed nothing new.
+    The credit is what makes each revive cost the community another meal. Here
+    guard 2 passes with room to spare (4 GEN effective against a 1 GEN cost) and
+    the request is refused anyway, which is the whole point.
+    """
+    pet = _fed_and_dead(direct_vm, direct_deploy, GEN, 5 * GEN)
+    _till_revive(direct_vm, pet)
+    _starve_to_death(direct_vm, pet, 2 * CAP_IDLE_H)
+
+    s = pet.get_state()
+    assert s["burned_wei"] == str(GEN)
+    assert s["withdrawable_wei"] == str(3 * GEN)     # 5 - 1 burned - 1 reserved
+    assert s["till_revive_ready"] is False           # ...and still not ready
+    direct_vm.value = 0
+    with direct_vm.expect_revert("revive costs at least 1 GEN"):
+        pet.revive()
+
+    # And the new food cannot be handed over the counter either: a corpse takes
+    # no meals. The only road back is someone paying for this death themselves,
+    # which is new food and is what re-arms the till — see
+    # test_paid_revive_counts_as_new_food_for_later_till_revive.
+    direct_vm.value = GEN
+    with direct_vm.expect_revert("pet is dead"):
+        pet.feed()
+    direct_vm.value = 0
+
+
+def test_paid_revive_does_not_also_burn(direct_vm, direct_deploy):
+    """Paying for a revive is buying food, not spending the till.
+
+    So burned_wei stays put, total_fed grows, and till_revive_at_fed does NOT
+    move — that payment is exactly what should let a LATER death be covered.
+    """
+    pet = _fed_and_dead(direct_vm, direct_deploy, GEN, 3 * GEN)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Paid for.", "mood_delta": 0}))
+    direct_vm.value = GEN
+    try:
+        pet.revive()
+    finally:
+        direct_vm.value = 0
+    direct_vm.clear_mocks()
+
+    s = pet.get_state()
+    assert s["burned_wei"] == "0"
+    assert int(s["total_fed_wei"]) == 2 * GEN
+    assert s["withdrawable_wei"] == str(2 * GEN)     # 3 held, 1 reserved, 0 burned
+    # the credit did not move, so the next death is the till's to cover
+    _starve_to_death(direct_vm, pet, 2 * CAP_IDLE_H)
+    assert pet.get_state()["till_revive_ready"] is True
+
+
+def test_paid_revive_counts_as_new_food_for_later_till_revive(direct_vm, direct_deploy):
+    """A pet nobody ever fed can still reach the till — through a paid revive.
+
+    total_fed is the one counter that decides, and every value path grows it.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    _fund_contract(direct_vm, 3 * GEN)
+    _starve_to_death(direct_vm, pet)
+    assert pet.get_state()["till_revive_ready"] is False   # never fed: nothing to spend
+
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Bought back.", "mood_delta": 0}))
+    direct_vm.value = GEN
+    try:
+        pet.revive()
+    finally:
+        direct_vm.value = 0
+    direct_vm.clear_mocks()
+    assert int(pet.get_state()["total_fed_wei"]) == GEN
+
+    _starve_to_death(direct_vm, pet, 2 * CAP_IDLE_H)
+    assert pet.get_state()["till_revive_ready"] is True
+    _till_revive(direct_vm, pet)
+    s = pet.get_state()
+    assert s["alive"] is True
+    assert s["burned_wei"] == str(GEN)
+    assert int(s["revives"]) == 2
+
+
+def test_partial_value_does_not_mix_with_till(direct_vm, direct_deploy):
+    """Half a revive plus the till is not a revive. A reserve drained a slice at
+    a time is not a reserve, and a part payment must not be booked as food."""
+    pet = _fed_and_dead(direct_vm, direct_deploy, GEN, 5 * GEN)
+    assert pet.get_state()["till_revive_ready"] is True    # the till COULD have paid
+    direct_vm.value = GEN // 10
+    with direct_vm.expect_revert("revive costs at least 1 GEN"):
+        pet.revive()
+    direct_vm.value = 0
+
+    s = pet.get_state()
+    assert s["alive"] is False
+    assert s["burned_wei"] == "0"
+    assert int(s["total_fed_wei"]) == GEN             # the 0.1 GEN was not booked
+
+
+def test_a_till_revive_on_a_living_pet_is_refused(direct_vm, direct_deploy):
+    """value == 0 hits the alive guard first, and gets the honest error for it."""
+    pet = _fed_pet(direct_vm, direct_deploy, GEN, 5 * GEN)
+    direct_vm.value = 0
+    with direct_vm.expect_revert("already alive"):
+        pet.revive()
+    assert pet.get_state()["burned_wei"] == "0"
+
+
+def test_withdrawable_wei_is_published(direct_vm, direct_deploy, direct_owner):
+    """A client must never have to model the reserve itself."""
+    direct_vm.sender = direct_owner
+    pet = _fed_pet(direct_vm, direct_deploy, GEN // 10, 4 * GEN)
+    assert pet.get_state()["withdrawable_wei"] == str(3 * GEN)
+    _fund_contract(direct_vm, GEN)
+    assert pet.get_state()["withdrawable_wei"] == "0"      # exactly the reserve, no more
+    _fund_contract(direct_vm, 0)
+    assert pet.get_state()["withdrawable_wei"] == "0"
+
+
+def test_till_revive_ready_is_published(direct_vm, direct_deploy):
+    """The flag a UI branches on, through all three of its guards.
+
+    Never `balance >= revive_cost`: that is guard 2 alone, and it is true in
+    every state below including the two where a till-revive is refused.
+    """
+    pet = _fed_pet(direct_vm, direct_deploy, GEN, 5 * GEN)
+    assert pet.get_state()["till_revive_ready"] is False   # guard 1: it is alive
+    _starve_to_death(direct_vm, pet)
+    assert pet.get_state()["till_revive_ready"] is True
+    _till_revive(direct_vm, pet)
+    assert pet.get_state()["till_revive_ready"] is False   # alive again
+    _starve_to_death(direct_vm, pet, 2 * CAP_IDLE_H)
+    assert pet.get_state()["till_revive_ready"] is False   # guard 3: no new food
 
 
 def test_malformed_llm_reply_is_rejected(direct_vm, direct_deploy):

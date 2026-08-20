@@ -1220,13 +1220,19 @@
             <h2><svg class="sigil"><use href="#sig" /></svg> Owner <em>the food money</em></h2>
             <div class="hr"></div>
             <div class="kv"><span>held by the contract</span><b id="balMeta">— GEN</b></div>
+            <div class="kv"><span>yours to take</span><b id="wdMeta">— GEN</b></div>
             <label class="stack" for="wdAmt">Withdraw</label>
             <div class="row">
               <div class="field"><input id="wdAmt" type="number" min="0" step="0.01" value="0.1" /></div>
               <button class="press slim" id="withdraw">Take it</button>
             </div>
-            <p class="hint">The payout settles when the transaction <b>finalizes</b> — about half an
-              hour on Bradbury. The balance stays put until then.</p>
+            <!-- Filled by loadState and shown only when the two numbers above
+                 disagree. A "yours to take" of zero next to a balance that is
+                 plainly not zero reads as a broken till unless it says why. -->
+            <p class="hint" id="tillNote" hidden></p>
+            <p class="hint">1 GEN stays as revive reserve; a till-revive locks it away for good,
+              then the till needs new food. The payout settles when the transaction
+              <b>finalizes</b> — about half an hour on Bradbury. The balance stays put until then.</p>
           </div>
         </div>
       </div>
@@ -1834,6 +1840,11 @@ let client = null, account = null, address = null;
 let signerAddress = null, signerMode = null;
 let busy = false, isOwner = false, alive = true, evolvingNow = true;
 let reviveCost = null, timeScale = 1;
+// The till, as the contract reports it. `tillReady` is the CONTRACT's answer to
+// "would a value==0 revive be accepted", never our own guess from the balance:
+// a till-revive locks its GEN without moving the balance at all, so a balance
+// that still looks full says nothing about whether the till may pay again.
+let tillReady = false, withdrawable = 0n;
 let pet = null, social = null, character = null;   // last state read from chain
 
 const short = (a) => a.slice(0, 6) + "…" + a.slice(-4);
@@ -2069,8 +2080,8 @@ function drawDead() {
   const bob = ui.frame % 2;
   drawSprite("dead", 40, 18 + bob);
   textCentered("it went quiet", 38);
-  textCentered(reviveCost !== null
-    ? `revive ${fromWei(reviveCost).toFixed(2)} gen` : "revive?", 48);
+  textCentered(tillReady ? "the till pays"
+    : reviveCost !== null ? `revive ${fromWei(reviveCost).toFixed(2)} gen` : "revive?", 48);
 }
 
 function drawBusy() {
@@ -2101,7 +2112,9 @@ function drawConfirm() {
     return;
   }
   const detail = m?.key === "visit" ? short(visitTarget || "0x0000000000")
-    : m?.key === "revive" ? `${fromWei(reviveCost ?? 0n).toFixed(2)} gen` : "";
+    : m?.key === "revive"
+      ? (tillReady ? "from the till" : `${fromWei(reviveCost ?? 0n).toFixed(2)} gen`)
+      : "";
   if (detail) textCentered(detail, 38);
   textCentered("b = yes  c = no", 50);
 }
@@ -2206,7 +2219,14 @@ async function runPending() {
 
   if (m.key === "revive") {
     if (reviveCost === null) { setStatus("State not loaded yet — hit Refresh.", "err"); return; }
-    await doAction("revive", { value: reviveCost, label: fromWei(reviveCost).toFixed(3) + " GEN" });
+    // Branch on the contract's own flag, never on `balance >= reviveCost`: that
+    // is one of the three guards, and the balance does not fall when the till
+    // pays. Missing key (an older pet) is falsy, so it pays the full price.
+    const value = tillReady ? 0n : reviveCost;
+    await doAction("revive", {
+      value,
+      label: tillReady ? "from the till" : fromWei(reviveCost).toFixed(3) + " GEN",
+    });
     return;
   }
   if (m.key === "visit") {
@@ -2766,6 +2786,13 @@ async function loadState(opts = {}) {
     ]);
     pet = s; social = soc; character = char;
     reviveCost = BigInt(s.revive_cost_wei ?? "0");
+    // Defensive on every till key: a pet deployed before the reserve existed
+    // publishes none of them and must keep working — no reserve, paid revive only.
+    const held = BigInt(bal ?? "0");
+    const burned = BigInt(s.burned_wei ?? "0");
+    const effective = held > burned ? held - burned : 0n;
+    withdrawable = BigInt(s.withdrawable_wei ?? bal ?? "0");
+    tillReady = s.till_revive_ready === true;
     alive = s.alive !== false;
     timeScale = Number(s.time_scale) || 1;
     evolvingNow = char?.evolving !== false;
@@ -2777,6 +2804,25 @@ async function loadState(opts = {}) {
     $("ownerBox").hidden = !isOwner;
     $("charControls").hidden = !isOwner;
     $("balMeta").textContent = fromWei(bal).toFixed(3) + " GEN";
+    $("wdMeta").textContent = fromWei(withdrawable).toFixed(3) + " GEN";
+    $("wdAmt").max = fromWei(withdrawable).toFixed(4);
+    // Why the two lines above can disagree. Three different reasons, and the
+    // owner is owed the right one: the reserve is doing its job, the dust is
+    // short of the reserve and waiting for food, or the till already spent it.
+    let note = "";
+    if (held > 0n && withdrawable === 0n) {
+      note = effective === 0n
+        ? "Every GEN here has already gone on a revive. It is locked for good."
+        : effective < reviveCost
+          ? "Less than the 1 GEN reserve. This dust is stuck on purpose until someone "
+            + "feeds the pet again — it is not a broken till."
+          : "Held back as the 1 GEN revive reserve — kept for the next death, not lost.";
+    }
+    if (note && burned > 0n) {
+      note += ` (${fromWei(burned).toFixed(2)} GEN of the balance was already spent reviving it.)`;
+    }
+    $("tillNote").textContent = note;
+    $("tillNote").hidden = !note;
     $("freeze").textContent = evolvingNow ? "Freeze" : "Unfreeze";
 
     renderCharacter(char);

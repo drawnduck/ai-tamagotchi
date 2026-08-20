@@ -812,6 +812,9 @@ class AiPet(gl.Contract):
     last_interaction_ts: u256
     birth_ts: u256
     total_fed: u256           # total fed (wei) — grows on feed()
+    # --- the till (see _effective_balance / _withdrawable / _till_revive_ready) ---
+    burned_wei: u256          # what the till has spent reviving this pet — locked, never sent
+    till_revive_at_fed: u256  # total_fed at the last till-revive (0 = never happened)
     allow_public_feed: bool    # may non-owners feed it? (community pet)
     last_quote: str
     history: DynArray[str]
@@ -889,6 +892,8 @@ class AiPet(gl.Contract):
         self.birth_ts = u256(now)
         self.last_interaction_ts = u256(now)
         self.total_fed = u256(0)
+        self.burned_wei = u256(0)
+        self.till_revive_at_fed = u256(0)
         self.allow_public_feed = True
         self.last_quote = ""
         self.alive = True
@@ -1134,6 +1139,62 @@ class AiPet(gl.Contract):
             feeder_total_wei=str(total),
             pet_total_wei=str(int(self.total_fed)),
         ).emit()
+
+    # ---- the till ----
+    #
+    # Food is a social contract: strangers pay to keep this pet alive, and the
+    # last GEN of what they paid belongs to the next revive rather than to the
+    # owner. These three read that promise off storage; nothing here writes.
+
+    def _effective_balance(self) -> int:
+        """What the till really holds: the balance minus what it has already spent.
+
+        A till-revive does not send the GEN anywhere. It books it as burned and
+        subtracts it here, for good — the wei can never be withdrawn, can never
+        revive anything again, and no address ever receives it. Economically
+        that is a burn; mechanically it is subtraction, which matters twice.
+        An outgoing transfer only leaves `self.balance` at FINALIZATION (~30 min
+        on Bradbury, and a silent no-op in direct mode), and a demo pet at
+        time_scale 3600 dies again inside that window — so a balance-only guard
+        would hand out the same GEN several times. Subtraction lands now.
+        """
+        left = int(self.balance) - int(self.burned_wei)
+        return left if left > 0 else 0
+
+    def _withdrawable(self) -> int:
+        """What the owner may take out. One GEN stays behind once anyone has fed it.
+
+        A pet nobody has ever fed made no such promise, so its dust is the
+        owner's to sweep up. Same rule for public and owner-only pets: two
+        branches here would be bytes spent on a surprise in the UI.
+
+        Dust — 0 < effective < REVIVE_COST while total_fed > 0 — is INTENTIONALLY
+        stuck. Too little to withdraw, too little to revive with, and it comes
+        unstuck only when more food arrives. A client MUST say that out loud: a
+        withdrawable of zero beside a non-zero balance reads as a broken till.
+        """
+        bal = self._effective_balance()
+        if int(self.total_fed) > 0:
+            return bal - REVIVE_COST if bal > REVIVE_COST else 0
+        return bal
+
+    def _till_revive_ready(self) -> bool:
+        """Would a value==0 revive() be paid out of the till right now?
+
+        All three guards are mandatory. Alive pets do not get revived at all.
+        The GEN has to still be here to be spent. And the third one is the
+        interesting one: the till must have taken in at least REVIVE_COST of NEW
+        food since the last time it paid for a death. Without it a 5 GEN till
+        buys five free deaths in a row and dying stops being a tax on anyone —
+        on a demo pet that loop closes every ~70 seconds. A consequence worth
+        stating plainly: a pet whose lifetime total_fed never reaches 1 GEN can
+        never till-revive at all, however full the box looks.
+        """
+        if self.alive:
+            return False
+        if self._effective_balance() < REVIVE_COST:
+            return False
+        return int(self.total_fed) - int(self.till_revive_at_fed) >= REVIVE_COST
 
     def _age_days(self) -> int:
         return self._elapsed(int(self.birth_ts)) // 86400
@@ -1762,13 +1823,32 @@ class AiPet(gl.Contract):
 
     @gl.public.write.payable
     def revive(self) -> str:
-        """Bring a dead pet back for REVIVE_COST. Anyone may pay — it counts as feeding."""
+        """Bring a dead pet back. Anyone may pay, and payment counts as feeding.
+
+        Two roads, and no third: send at least REVIVE_COST, or send nothing at
+        all and let the till pay — which it does only when the community has fed
+        this pet REVIVE_COST of NEW food since the last time the till covered a
+        death (see _till_revive_ready). A till-revive LOCKS that GEN rather than
+        paying it to whoever called: rewarding the reviver would turn a
+        well-fed community pet into a faucet a stranger drains by grief-reviving
+        it, and the point of the reserve is that dying still costs somebody.
+        """
         if self.alive:
             raise gl.vm.UserError("pet is already alive")
 
+        # Two ways back: pay for it, or let the till pay. Nothing in between —
+        # a part payment is not topped up out of the reserve, because a reserve
+        # that can be drained a slice at a time is not a reserve.
         value = int(gl.message.value)
-        if value < REVIVE_COST:
-            raise gl.vm.UserError("revive costs at least 1 GEN")
+        from_till = value == 0
+        if 0 < value < REVIVE_COST:
+            raise gl.vm.UserError(
+                "revive costs at least 1 GEN (send it, or leave it in the till)"
+            )
+        if from_till and not self._till_revive_ready():
+            raise gl.vm.UserError(
+                "revive costs at least 1 GEN (send it, or leave it in the till)"
+            )
 
         self.alive = True
         self.died_ts = u256(0)
@@ -1779,13 +1859,31 @@ class AiPet(gl.Contract):
         self.mood = u256(REVIVE_MOOD)
         # a new life banks its own well-fed hours; the corpse's do not carry over
         self.health_regen_acc = u256(0)
-        self.total_fed = u256(int(self.total_fed) + value)
-        self._credit_feeder(gl.message.sender_address, value)
+        if from_till:
+            # The death tax, paid by the community that fed it. The GEN does not
+            # move and does not come back: burned_wei is subtracted from every
+            # figure this contract reports from here on. Nobody is credited for
+            # it either — you cannot climb the leaderboard by spending money
+            # that was already in the box, and a stranger who calls this is
+            # spending the community's GEN, not pocketing it.
+            self.burned_wei = u256(int(self.burned_wei) + REVIVE_COST)
+            # Immediately, not at finalization: this is what stops the next
+            # death being free. See _till_revive_ready. total_fed does NOT grow.
+            self.till_revive_at_fed = u256(int(self.total_fed))
+        else:
+            # The paid path, unchanged. This is new food, so it grows total_fed
+            # and credits the payer — and deliberately does NOT move
+            # till_revive_at_fed, because that payment is exactly what should
+            # let a LATER death be covered by the till.
+            self.total_fed = u256(int(self.total_fed) + value)
+            self._credit_feeder(gl.message.sender_address, value)
         # restart the decay clock so the revive isn't instantly undone
         self.last_interaction_ts = u256(_now())
         PetRevived(
             gl.message.sender_address,
             paid_wei=str(value),
+            from_till=from_till,
+            burned_wei=str(REVIVE_COST if from_till else 0),
             revives=int(self.revives),
         ).emit()
 
@@ -1836,14 +1934,21 @@ class AiPet(gl.Contract):
         amount = int(amount_wei)
         if amount <= 0:
             raise gl.vm.UserError("amount must be positive")
+        # Two guards, in this order. The first is about money that is not there
+        # at all; the second is about money that is there and is spoken for.
+        # Swapping them would tell an owner asking for ten times the balance
+        # about the reserve, which is true but not the answer to the question.
         if amount > int(self.balance):
             raise gl.vm.UserError("insufficient contract balance")
+        if amount > self._withdrawable():
+            raise gl.vm.UserError("revive reserve — leave at least 1 GEN in the till")
         _Payee(self.owner).emit_transfer(value=u256(amount))
         OwnerWithdrew(
             self.owner,
             amount_wei=str(amount),
-            # what is left once the transfer settles — the balance has not moved yet
-            remaining_wei=str(int(self.balance) - amount),
+            # what is left once the transfer settles — the balance has not moved
+            # yet, and anything the till already burned was never theirs to take
+            remaining_wei=str(self._effective_balance() - amount),
         ).emit()
 
     # ---- owner-only settings ----
@@ -1926,6 +2031,15 @@ class AiPet(gl.Contract):
             # well-fed hours banked toward the next point of health, so a client
             # can show "healing" honestly instead of guessing from the meters
             "health_regen_acc": int(self.health_regen_acc),
+            # The till, published so no client has to model the reserve itself.
+            # get_balance() is the raw balance and now overstates what is there:
+            # burned_wei is the part the till has already spent on deaths, and
+            # withdrawable_wei is what the owner may actually take.
+            "withdrawable_wei": str(self._withdrawable()),
+            "burned_wei": str(int(self.burned_wei)),
+            # true only when a value==0 revive() would really be accepted — a UI
+            # must never work this out from the balance alone
+            "till_revive_ready": self._till_revive_ready(),
         }
 
     @gl.public.view
