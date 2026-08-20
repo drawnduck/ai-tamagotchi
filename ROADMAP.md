@@ -171,7 +171,7 @@ still a double — nothing there runs the other pet's code, which is what `npm r
 the `PEER_ADDRESS` network test are for.
 
 Time-dependent tests use `direct_vm.warp()`, which patches the exact `datetime.now()` the contract
-reads — "150 idle hours" is exact, not slept through.
+reads — "138 idle hours" is exact, not slept through.
 
 ### 2.5 Ways to run it
 
@@ -315,7 +315,7 @@ The distinction that matters: *written* ≠ *proven*.
 
 | Claim | How it was proven |
 |---|---|
-| Contract mechanics, guards, death/revive, leaderboard, clamping, malformed-reply rejection, time_scale, event signatures, `__receive__`, market bands, visit bookkeeping and sanitizing, the decay cursor, a refunded feed-on-death, a poisoned leaderboard | 136/136 direct tests in the real GenVM runtime |
+| Contract mechanics, guards, death/revive, leaderboard, clamping, malformed-reply rejection, time_scale, event signatures, `__receive__`, market bands, visit bookkeeping and sanitizing, the decay cursor, a refunded feed-on-death, a poisoned leaderboard | 227/227 direct tests in the real GenVM runtime |
 | The contract deploys to a real network | Deployed twice to hosted Studio, reproducibly |
 | `check()` makes a real web request and a real LLM call, settled by consensus | Live Studio run; each action finalized in 40–55 s |
 | The real weather actually moves the pet | Mood 70 → 73 = `+3` for a `clear` category + model delta; Lisbon was genuinely sunny and the generated line said so |
@@ -582,7 +582,8 @@ before it was believed, and each now has a regression test. Redeployed to Bradbu
 
 `_decay()` billed drift in **whole** virtual hours (`elapsed // 3600`) while `_finish()` reset
 `last_interaction_ts` to `_now()`. Every action therefore threw away up to 59 minutes of accrued
-hunger. Since `pet()` is free and lifts the mood, acting just under the hour was a complete escape
+hunger. Since `pet()` was free and lifted the mood (it still is free, but it is now +2 and stops moving
+the meter at 80 — see the gameplay-mechanics patch), acting just under the hour was a complete escape
 from the economy: **12 `pet()` calls across 11.8 virtual hours left satiety untouched at its initial
 70**, with mood climbing to 100. Nobody ever had to buy food, and the pet could not age into
 starvation.
@@ -1011,13 +1012,16 @@ Cheap, no blockers, can happen any time:
 
 ### Phase 4 — Make the interesting part reachable ✅ built
 
-Dying naturally takes 150 hours, which no demo can wait for — and it was also the reason `revive()`
-had never run on a real network.
+Dying naturally takes 138 billed hours from a fresh hatch (150 when this was written, before decay
+was billed hour by hour at stage rates), which no demo can wait for — and it was also the reason
+`revive()` had never run on a real network.
 
 Solved with **one** constructor parameter rather than per-rate knobs: `time_scale`, how many virtual
 seconds pass per real second (default `1` = real time, unchanged). Every rate in the contract stays
 "per hour"; only the clock moves. At `time_scale = 3600` one real second is a virtual hour, so the
-pet ages a day every 24 seconds and starves to death in about two and a half minutes.
+pet ages a day every 24 seconds and dies in about two and a quarter minutes (138 s). The scale must
+divide 3600 exactly: the decay cursor carries its unbilled remainder as `leftover // time_scale` real
+seconds, and that division is only exact for a divisor of an hour.
 
 Why one knob instead of three: scaling the rates alone would not have worked. `_decay()` counts in
 whole idle hours, so under an hour of real time rounds to zero drift no matter how aggressive the
