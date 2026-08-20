@@ -99,6 +99,18 @@ VISIT_MOOD_HOST = 2         # the host's reward for the company
 VISIT_SATIETY_COST = 3      # walking over burns a little energy
 GREETING_MAX = 160          # chars kept from a neighbour's line
 FOREIGN_NAME_MAX = 32       # chars kept from a neighbour's name
+# How many unanswered guests the pet keeps in mind at once. Three, because that
+# is about as many voices as one prompt can answer coherently — past that the
+# reply turns into a roll call. The fourth guest is not turned away: the
+# friendship, the mood payout and the history line all still happen. Only the
+# place in the prompt is rationed, and the OLDEST guest is never evicted to make
+# room, because a queue that forgets its head is the same bug as the single slot
+# that used to be overwritten by whoever knocked last.
+GREETING_QUEUE_MAX = 3
+# "nobody" in the head-of-queue keys get_social still publishes under the old
+# single-slot names. Spelled out rather than built from Address(bytes(20)) —
+# same 42 characters, no object allocated on a view every client polls.
+_ZERO_ADDR = "0x" + "0" * 40
 
 # --- character drift ------------------------------------------------------- #
 # The pet's persona is written by its owner and goes verbatim into every prompt.
@@ -814,9 +826,14 @@ class AiPet(gl.Contract):
     last_met: TreeMap[Address, u256]  # other pets -> real ts of the last COUNTED meeting
     visits_sent: u256
     visits_received: u256
-    pending_from: Address      # a guest we have not answered yet (zero = none)
-    pending_name: str          # their name, read from THEIR contract, sanitized
-    pending_quote: str         # their line — foreign text, sanitized, never our voice
+    # Three parallel arrays, not one array of a struct: GenVM storage has no
+    # record type, and index i of each is one guest. They are only ever appended
+    # to and popped from together, and _queue_ok() checks that before any
+    # mutation — a desynced queue would hand one guest's words to another
+    # guest's name, which is the one attack _sanitize cannot defend against.
+    pending_from: DynArray[Address]   # guests we have not answered yet, oldest first
+    pending_name: DynArray[str]       # their names, read from THEIR contracts, sanitized
+    pending_quote: DynArray[str]      # their lines — foreign text, sanitized, never our voice
     # --- character drift (see TRAITS) ---
     trait_levels: DynArray[u256]   # one slot per TRAITS entry, 0..TRAIT_MAX
     last_evolved_ts: u256          # real ts of the last nudge (0 = never)
@@ -879,9 +896,7 @@ class AiPet(gl.Contract):
         self.revives = u256(0)
         self.visits_sent = u256(0)
         self.visits_received = u256(0)
-        self.pending_from = Address(bytes(20))
-        self.pending_name = ""
-        self.pending_quote = ""
+        # the three greeting queues start empty; a DynArray needs no initialiser
         # one counter per trait, in TRAITS order — that order IS the schema
         for _ in TRAITS:
             self.trait_levels.append(u256(0))
@@ -1171,7 +1186,11 @@ class AiPet(gl.Contract):
         """
         self.history.append(line)
         while len(self.history) > HISTORY_MAX:
-            self.history.pop(0)
+            # `del`, not `pop(0)`: GenVM's DynArray.pop() takes NO index and drops
+            # the newest element, so pop(0) raises TypeError. That made the 21st
+            # line of history brick every write method on the contract, revive()
+            # included, permanently. `del` shifts left and shortens the array.
+            del self.history[0]
 
     def _record(self, quote: str) -> None:
         """The pet's own voice: shown in the bubble and kept in the feed."""
@@ -1197,16 +1216,36 @@ class AiPet(gl.Contract):
             self.last_met[other] = u256(_now())
         return fresh
 
+    def _queue_ok(self) -> bool:
+        """True when the three greeting queues are still the same length.
+
+        They are always mutated together, so this can only be False if a storage
+        write was interrupted or a future migration went wrong. When it is False
+        the queue is not partially repaired and not partially read: it simply
+        stops being used, because index i of one array no longer means the same
+        guest as index i of another, and pairing a stranger's words with a
+        friend's name is worse than forgetting both.
+        """
+        n = len(self.pending_from)
+        return n == len(self.pending_name) and n == len(self.pending_quote)
+
     def _greeting(self) -> tuple:
-        """The unanswered guest as (fenced data line, name to answer).
+        """The guest at the HEAD of the queue as (fenced data line, name to answer).
 
         Both empty when nobody is waiting. The two halves go to different places
-        in the prompt for different reasons — see _build_prompt.
+        in the prompt for different reasons — see _build_prompt. Only the head is
+        offered: one speak answers one guest, and _clear_greeting pops that one.
+
+        The strings are NOT re-sanitized here. receive_visit cleans them once, on
+        ingest, before they are ever stored; cleaning again on every read would
+        be a second implementation of the same rule, free to drift from the first.
         """
-        name = str(self.pending_name)
+        if not self._queue_ok() or len(self.pending_from) == 0:
+            return "", ""
+        name = str(self.pending_name[0])
         if not name:
             return "", ""
-        quote = str(self.pending_quote)
+        quote = str(self.pending_quote[0])
         if not quote:
             return f"another pet, {name}, came by to see you;", name
         return f'another pet, {name}, came by and said: "{quote}";', name
@@ -1382,9 +1421,17 @@ class AiPet(gl.Contract):
         return quote
 
     def _clear_greeting(self) -> None:
-        self.pending_from = Address(bytes(20))
-        self.pending_name = ""
-        self.pending_quote = ""
+        """Drop the guest just answered. One speak, one pop — see _finish.
+
+        A no-op on an empty queue, deliberately: _finish calls this after every
+        line the pet speaks at home, and speaking with nobody waiting is the
+        normal case, not an error. `del`, not `pop(0)` — GenVM's DynArray.pop()
+        takes no index and would drop the NEWEST guest.
+        """
+        if self._queue_ok() and len(self.pending_from) > 0:
+            del self.pending_from[0]
+            del self.pending_name[0]
+            del self.pending_quote[0]
 
     def _apply_reply(self, reply: dict) -> str:
         """Apply the LLM result to mood and record the line (deterministic)."""
@@ -1690,9 +1737,15 @@ class AiPet(gl.Contract):
             self.mood = _clamp(int(self.mood) + VISIT_MOOD_HOST)
         self.visits_received = u256(int(self.visits_received) + 1)
 
-        self.pending_from = guest
-        self.pending_name = name
-        self.pending_quote = line
+        # Room in the prompt is rationed; friendship is not. A guest who arrives
+        # to a full queue keeps the mood payout, the friends counter and the
+        # history line above — they just do not get a line in the next prompt.
+        # The oldest is never evicted: whoever knocked first is answered first.
+        queued = self._queue_ok() and len(self.pending_from) < GREETING_QUEUE_MAX
+        if queued:
+            self.pending_from.append(guest)
+            self.pending_name.append(name)
+            self.pending_quote.append(line)
         # _note, not _record: this is the guest talking, not the pet.
         self._note(f'{name} came by: "{line}"' if line else f"{name} came by.")
 
@@ -1703,6 +1756,8 @@ class AiPet(gl.Contract):
             counted=counted,
             meetings=int(self.friends.get(guest) or 0),
             mood=int(self.mood),
+            queued=queued,
+            queue_len=len(self.pending_from),
         ).emit()
 
     @gl.public.write.payable
@@ -1918,14 +1973,28 @@ class AiPet(gl.Contract):
 
     @gl.public.view
     def get_social(self) -> dict:
-        """The pet's social life, including any guest it has not answered yet."""
+        """The pet's social life, including the guests it has not answered yet."""
+        ok = self._queue_ok()
+        head = ok and len(self.pending_from) > 0
         return {
             "friends": len(self.friends),
             "visits_sent": int(self.visits_sent),
             "visits_received": int(self.visits_received),
-            "pending_from": self.pending_from.as_hex,
-            "pending_name": str(self.pending_name),
-            "pending_quote": str(self.pending_quote),
+            # The three original keys now describe the HEAD of the queue, under
+            # their old names and with their old empty values, so a client
+            # written against the single-slot version keeps working unchanged.
+            "pending_from": self.pending_from[0].as_hex if head else _ZERO_ADDR,
+            "pending_name": str(self.pending_name[0]) if head else "",
+            "pending_quote": str(self.pending_quote[0]) if head else "",
+            # and the whole queue, oldest first, for a client that wants it
+            "pending": [
+                {"from": a.as_hex,
+                 "name": str(self.pending_name[i]),
+                 "quote": str(self.pending_quote[i])}
+                for i, a in enumerate(self.pending_from)
+            ] if ok else [],
+            "pending_count": len(self.pending_from) if ok else 0,
+            "greeting_queue_max": GREETING_QUEUE_MAX,
             "visit_cooldown_hours": VISIT_COOLDOWN_H,
         }
 

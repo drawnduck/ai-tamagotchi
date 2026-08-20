@@ -365,6 +365,15 @@ test("visit() posts the greeting as a call to the host", { skip: !process.env.PE
     address.toLowerCase(),
     "the host recorded the wrong guest",
   );
+
+  // The three keys above are the HEAD of a FIFO queue now, not a single slot.
+  // A peer that has been greeted once holds exactly one guest, and the head
+  // must agree with the queue — if these ever disagree, the compatibility shim
+  // in get_social() is publishing something the queue does not contain.
+  assert.equal(Number(after.greeting_queue_max), 3, "GREETING_QUEUE_MAX changed");
+  assert.equal(Number(after.pending_count), 1, "one greeting, one queued guest");
+  assert.equal(after.pending[0].quote, after.pending_quote);
+  assert.equal(after.pending[0].from.toLowerCase(), after.pending_from.toLowerCase());
 });
 
 test("a bare transfer reaches __receive__ and is credited", { skip: !process.env.RECEIVE }, async () => {

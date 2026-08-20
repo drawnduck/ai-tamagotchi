@@ -232,6 +232,29 @@ def test_play_updates_state_and_speaks(direct_vm, direct_deploy):
     assert pet.get_history() == [s["last_quote"]]
 
 
+def test_the_feed_drops_its_oldest_line_past_twenty(direct_vm, direct_deploy):
+    """HISTORY_MAX is a ring, and until this PR the trim was a live grenade.
+
+    `_note` trimmed with `self.history.pop(0)`, but GenVM's DynArray.pop() takes
+    NO index — so the 21st line raised TypeError inside a deterministic block and
+    bricked EVERY write method on the contract, revive() included, permanently.
+    Nothing reached it before: no test had ever pushed a pet past twenty lines.
+    The fix is `del self.history[0]`, which shifts left and shortens the array.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    for i in range(21):                     # HISTORY_MAX is 20
+        direct_vm.clear_mocks()
+        direct_vm.mock_llm(r".*", json.dumps({"quote": f"line {i}", "mood_delta": 0}))
+        pet.pet()
+
+    feed = pet.get_history()
+    assert len(feed) == 20
+    assert feed[0] == "line 1", "the OLDEST line is the one that goes"
+    assert feed[-1] == "line 20"
+    assert "line 0" not in feed
+
+
 def test_pet_applies_valid_reply(direct_vm, direct_deploy):
     pet = direct_deploy(CONTRACT, *CTOR)
     direct_vm.mock_llm(r".*", json.dumps({"quote": "Purr, thank you.", "mood_delta": 1}))
@@ -2326,13 +2349,18 @@ def test_a_pet_out_visiting_is_not_told_to_answer_someone_at_home(direct_vm, dir
     direct_vm.mock_llm(r".*", json.dumps({"quote": "GREETED THE HOST", "mood_delta": 0}))
 
     assert pet.visit(nb.address_hex) == "GREETED THE HOST"
-    assert pet.get_social()["pending_name"] == "Mochi", "still waiting to be answered"
+    social = pet.get_social()
+    assert social["pending_name"] == "Mochi", "still waiting to be answered"
+    # visit() finishes with answered_guest=False, so it neither peeks at the home
+    # queue nor pops it — the guest is still there, and still the only one.
+    assert social["pending_count"] == 1
 
     # back home, the next line is the one that answers them
     direct_vm.clear_mocks()
     direct_vm.mock_llm(r"answer Mochi", json.dumps({"quote": "Hello Mochi.", "mood_delta": 0}))
     assert pet.pet() == "Hello Mochi."
     assert pet.get_social()["pending_name"] == ""
+    assert pet.get_social()["pending_count"] == 0
 
 
 @pytest.mark.parametrize("hostile,expected", [
@@ -2373,7 +2401,13 @@ def test_a_hostile_neighbour_name_is_sanitized_too(direct_vm, direct_deploy, dir
     assert "]" not in pet.get_social()["pending_name"]
 
 
-def test_social_view_starts_empty(direct_deploy):
+def test_social_view_starts_empty_with_an_empty_queue(direct_deploy):
+    """Exact equality on purpose: it catches a renamed or vanished key too.
+
+    The three `pending_*` keys are no longer a single slot — they are the HEAD of
+    the greeting queue, published under their old names and with their old empty
+    values so a client written against the single-slot version keeps working.
+    """
     pet = direct_deploy(CONTRACT, *CTOR)
     social = pet.get_social()
     assert social == {
@@ -2383,9 +2417,106 @@ def test_social_view_starts_empty(direct_deploy):
         "pending_from": "0x" + "0" * 40,
         "pending_name": "",
         "pending_quote": "",
+        "pending": [],
+        "pending_count": 0,
+        "greeting_queue_max": 3,        # GREETING_QUEUE_MAX
         "visit_cooldown_hours": 6,
     }
     assert pet.get_friends(0) == []
+
+
+def test_three_guests_are_answered_in_the_order_they_arrived(
+    direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie
+):
+    """FIFO, not the last one wins.
+
+    The single slot this replaces was overwritten by whoever knocked last, so a
+    morning with two callers put the SECOND one in the prompt and forgot the
+    first had ever come. Three guests, three speaks, answered oldest first.
+
+    Each guest needs its own Neighbour double, and the double installs itself as
+    THE gl_call hook (`vm._gl_call_hook = self._hook`, conftest.py) — so a second
+    one replaces the first. Constructing each immediately before its own greeting
+    is what keeps every `_neighbour_state` lookup answerable.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    for who, who_name in ((direct_alice, "Alfa"), (direct_bob, "Bravo"), (direct_charlie, "Cee")):
+        Neighbour(direct_vm, who, name=who_name, stage="adult", mood=55)
+        _greet(pet, direct_vm, who, f"{who_name} says hi.")
+
+    social = pet.get_social()
+    assert social["pending_count"] == 3
+    assert [g["name"] for g in social["pending"]] == ["Alfa", "Bravo", "Cee"]
+    assert [g["quote"] for g in social["pending"]] == [
+        "Alfa says hi.", "Bravo says hi.", "Cee says hi."]
+    assert social["pending"][0]["from"].lower() == to_hex(direct_alice).lower()
+    # the old single-slot keys track the head of the queue
+    assert social["pending_name"] == "Alfa"
+    assert social["pending_from"].lower() == to_hex(direct_alice).lower()
+
+    # one speak answers exactly one guest, oldest first
+    for expected in ("Alfa", "Bravo", "Cee"):
+        direct_vm.clear_mocks()
+        direct_vm.mock_llm(rf"answer {expected}",
+                           json.dumps({"quote": f"hello {expected}", "mood_delta": 0}))
+        assert pet.pet() == f"hello {expected}"
+
+    social = pet.get_social()
+    assert social["pending_count"] == 0
+    assert social["pending"] == []
+    assert social["pending_name"] == ""
+    assert social["pending_from"] == "0x" + "0" * 40
+
+
+def test_a_fourth_guest_is_remembered_but_not_queued(
+    direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie, direct_owner
+):
+    """Only the place in the PROMPT is rationed — the friendship is not.
+
+    And the oldest guest is never evicted to make room: a queue that forgets its
+    head to admit a newcomer is the same bug as the single slot it replaced.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    for who, who_name in ((direct_alice, "Alfa"), (direct_bob, "Bravo"),
+                          (direct_charlie, "Cee"), (direct_owner, "Delta")):
+        Neighbour(direct_vm, who, name=who_name, stage="adult", mood=55)
+        _greet(pet, direct_vm, who, f"{who_name} says hi.")
+
+    social = pet.get_social()
+    assert social["pending_count"] == 3                     # GREETING_QUEUE_MAX
+    assert [g["name"] for g in social["pending"]] == ["Alfa", "Bravo", "Cee"]
+    assert social["pending_name"] == "Alfa", "the oldest guest was not evicted"
+
+    # the fourth guest still got everything except a line in the prompt
+    assert social["visits_received"] == 4
+    assert social["friends"] == 4
+    assert 'Delta came by: "Delta says hi."' in pet.get_history()
+    # (PetGreeted also carries queued=False and queue_len=3, but direct mode has
+    # no event sink, so nothing here can assert on the blob.)
+
+
+def test_queue_pop_requires_all_three_nonempty(direct_vm, direct_deploy):
+    """Speaking with nobody waiting must be an ordinary, silent no-op.
+
+    _finish calls _clear_greeting after every line the pet speaks at home, so the
+    empty queue is the common case — and GenVM's `del q[0]` on an empty DynArray
+    raises. A guard that only checked one of the three arrays would still pop the
+    other two and desync the queue permanently.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "alone, then.", "mood_delta": 0}))
+
+    assert pet.get_social()["pending_count"] == 0
+    assert pet.pet() == "alone, then."
+    assert pet.pet() == "alone, then."
+    social = pet.get_social()
+    assert social["pending_count"] == 0
+    assert social["pending"] == []
 
 
 # --------------------------------------------------------------------------- #

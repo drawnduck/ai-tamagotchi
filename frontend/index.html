@@ -2014,8 +2014,11 @@ function drawHome() {
   bar(8, 48, 24, Number(pet?.satiety ?? 0));
   bar(36, 48, 24, Number(pet?.mood ?? 0));
   bar(64, 48, 24, Number(pet?.health ?? 0));
-  // a heart marks the guest nobody has answered yet
-  if (social && String(social.pending_name || "").trim()) drawIcon("heart", 84, 20);
+  // a heart marks the guests nobody has answered yet. pending_count is the
+  // queue; pending_name is the old single-slot key, kept as the fallback so a
+  // pet deployed before the queue still shows its heart.
+  if (social && (Number(social.pending_count ?? 0) > 0
+                 || String(social.pending_name || "").trim())) drawIcon("heart", 84, 20);
 }
 
 function drawStats() {
@@ -2055,8 +2058,11 @@ function drawChar() {
   const sent = Number(social?.visits_sent ?? 0), got = Number(social?.visits_received ?? 0);
   text(`friends ${friends}`, 2, 36);
   text(`out ${sent} in ${got}`, 2, 44);
-  const guest = String(social?.pending_name || "").trim();
-  if (guest) text(`${guest.slice(0, 9)} came`, 2, 52);
+  // up to GREETING_QUEUE_MAX guests wait their turn; 96px only fits one name,
+  // so the rest are a count. `?? []` is the old-pet path: no queue, no crash.
+  const q = Array.isArray(social?.pending) ? social.pending : [];
+  const guest = String(q[0]?.name || social?.pending_name || "").trim();
+  if (guest) text(q.length > 1 ? `${guest.slice(0, 6)} +${q.length - 1}` : `${guest.slice(0, 9)} came`, 2, 52);
 }
 
 function drawDead() {
