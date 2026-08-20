@@ -41,9 +41,19 @@ CONTRACT = os.environ.get("AIPET_CONTRACT", "contracts/ai_pet.py")
 CTOR = ("Pixel", "a sleepy philosopher cat who speaks in riddles", "Lisbon")
 GEN = 10 ** 18
 SATIETY_PER_HOUR = 2      # mirrors the contract constant
+WEI_PER_SATIETY = 10 ** 16   # mirrors the contract constant
+HEALTH_REGEN_HOURS = 4       # mirrors the contract constant
+HEALTH_FEED_GAIN_MIN = 10    # mirrors the contract constant
 
-# Idle hours that starve the pet all the way to health 0 (satiety drains at 2/h
-# and, once under 20, health drains at 1/h).
+# Idle hours that starve the pet all the way to health 0, with slack.
+#
+# Decay is billed one hour at a time and each hour is judged by the satiety it
+# STARTS with: hour k starts at HATCH_SATIETY - 2(k-1), so the first hour that
+# starts under STARVE_SATIETY is k=27 (start 18) — hour 26 starts at exactly 20
+# and is still fed. Health then bleeds 1/h for 100 hours, so a neglected hatch
+# dies on billed hour 126 exactly (measured, not estimated). 150 is deliberate
+# slack so that a rate change moves the clock without silently un-killing every
+# test built on _kill().
 LETHAL_IDLE_H = 150
 
 
@@ -182,9 +192,16 @@ def test_starving_costs_health_but_not_life(direct_vm, direct_deploy):
     warp_hours(direct_vm, 30)
     pet.pet()
     s = pet.get_state()
-    # 30 idle h: satiety 70-60=10 (<20, so health bleeds), health 100-30=70
+    # 30 idle h, billed one at a time: satiety 70-60=10, but only the hours that
+    # STARTED under STARVE_SATIETY cost health. Hour k starts at 70-2(k-1), so
+    # the first starving hour is k=27 — hour 26 starts at exactly 20 and is still
+    # fed. Four starving hours, not thirty: health 100-4=96.
+    #
+    # The old lump form checked the satiety that was LEFT after all 30 hours of
+    # hunger and then charged health for every one of them, which is how a pet
+    # that was hungry for four hours arrived at the vet 30 points down.
     assert int(s["satiety"]) == 10
-    assert int(s["health"]) == 70
+    assert int(s["health"]) == 96
     assert s["alive"] is True
 
 
@@ -229,6 +246,404 @@ def test_a_feed_that_arrives_as_the_pet_dies_is_refunded(
     direct_vm.value = GEN
     with direct_vm.expect_revert("starved"):
         pet.feed()
+
+
+# ------------------- health: the scar, and how it heals ----------------------
+#
+# Health used to be a one-way ratchet. It now mends, at a quarter of the speed it
+# bleeds: STARVE_HEALTH_PER_HOUR off for every hour that STARTS under
+# STARVE_SATIETY, one point on for every HEALTH_REGEN_HOURS that start at or
+# above HEALTH_REGEN_SATIETY, and nothing at all in the band between — see
+# _decay. These tests all start from a pet that has actually been hurt, because
+# on a healthy pet _clamp pins health at 100 and every "+1 HP" assertion passes
+# for the wrong reason.
+
+SCAR_HOURS = 37       # idle hours that bleed exactly 11 HP off a fresh hatch
+
+
+def _feed(pet, direct_vm, wei):
+    """feed() with a value, leaving direct_vm.value where it found it."""
+    direct_vm.value = wei
+    try:
+        pet.feed()
+    finally:
+        direct_vm.value = 0
+
+
+def _scarred(direct_vm, direct_deploy):
+    """A pet with a real scar and an empty stomach, on a clean hour boundary.
+
+    37 idle hours from a fresh hatch: the first hour that STARTS under
+    STARVE_SATIETY is k=27, so hours 27..37 are the starving ones — 11 of them,
+    health 100-11=89. No hour starts at HEALTH_REGEN_SATIETY or above, so
+    nothing is banked. The cursor lands exactly on hour 37 with no leftover,
+    which is what lets every warp after this one bill whole hours from a state
+    the test knows to the point.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "I ache.", "mood_delta": 0}))
+    warp_hours(direct_vm, SCAR_HOURS)
+    pet.pet()
+    s = pet.get_state()
+    assert (int(s["satiety"]), int(s["health"]), s["alive"]) == (0, 89, True)
+    assert int(s["health_regen_acc"]) == 0
+    return pet
+
+
+def _full_tank(direct_vm, direct_deploy):
+    """_scarred(), then fed to the brim: satiety 100, health 90, nothing banked."""
+    pet = _scarred(direct_vm, direct_deploy)
+    _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)   # 0 -> 50: big meal, still not well fed
+    _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)   # 50 -> 100: this one also mends a point
+    s = pet.get_state()
+    assert (int(s["satiety"]), int(s["health"]), int(s["health_regen_acc"])) == (100, 90, 0)
+    return pet
+
+
+def test_no_write_after_warp_leaves_state_unchanged(direct_vm, direct_deploy):
+    """Invariant 1: there is no idle tick. Time on its own moves nothing.
+
+    Every number in this file's arithmetic depends on it — decay is billed by the
+    action that notices it, never by the clock.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    warp_hours(direct_vm, 50)
+    s = pet.get_state()
+    assert int(s["satiety"]) == 70
+    assert int(s["mood"]) == 70
+    assert int(s["health"]) == 100
+    assert int(s["health_regen_acc"]) == 0
+    assert s["alive"] is True
+
+
+def test_full_tank_11h_heals_plus_2_hp_acc_3(direct_vm, direct_deploy):
+    pet = _full_tank(direct_vm, direct_deploy)
+    warp_hours(direct_vm, SCAR_HOURS + 11)
+    pet.pet()
+    s = pet.get_state()
+    # Hours start at 100, 98, ... 80 — eleven of them at or above
+    # HEALTH_REGEN_SATIETY. The bank tips on the 4th and the 8th, so two points,
+    # and the 11th leaves three hours banked toward the next one.
+    assert int(s["satiety"]) == 78
+    assert int(s["health"]) == 92
+    assert int(s["health_regen_acc"]) == 3
+
+
+def test_full_tank_40h_does_not_heal_10_hp(direct_vm, direct_deploy):
+    """Correction C5: a full tank left alone does NOT buy back 10 HP.
+
+    Only eleven of the forty hours start in the band — after that the pet is
+    merely fed, not well fed, and the middle band banks nothing. Idle time is not
+    a healing potion; the pet has to be kept topped up to keep mending.
+    """
+    pet = _full_tank(direct_vm, direct_deploy)
+    warp_hours(direct_vm, SCAR_HOURS + 40)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["satiety"]) == 20
+    assert int(s["health"]) == 92          # +2, not +10
+    assert int(s["health_regen_acc"]) == 0
+
+
+def test_sitting_at_80_first_hour_is_in_band_second_is_not(direct_vm, direct_deploy):
+    """HEALTH_REGEN_SATIETY is read at the hour's START, and the test is a >=."""
+    pet = _scarred(direct_vm, direct_deploy)
+    _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)
+    _feed(pet, direct_vm, 30 * WEI_PER_SATIETY)      # satiety exactly HEALTH_REGEN_SATIETY
+    assert int(pet.get_state()["satiety"]) == 80
+
+    warp_hours(direct_vm, SCAR_HOURS + 1)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["satiety"]) == 78
+    assert int(s["health_regen_acc"]) == 1           # 80 counts
+
+    warp_hours(direct_vm, SCAR_HOURS + 2)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["satiety"]) == 76
+    assert int(s["health_regen_acc"]) == 0           # 78 does not, and it clears the bank
+
+
+def test_middle_band_clears_health_regen_acc(direct_vm, direct_deploy):
+    """A slump costs the bank, not just the hour.
+
+    Carrying a remainder through the middle band would let three well-fed hours,
+    a crash to 76 and one refill produce a point of health out of nowhere — care
+    the owner never actually gave.
+    """
+    pet = _scarred(direct_vm, direct_deploy)
+    _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)
+    _feed(pet, direct_vm, 34 * WEI_PER_SATIETY)      # satiety 84, and this meal mends one
+    assert (int(pet.get_state()["satiety"]), int(pet.get_state()["health"])) == (84, 90)
+
+    warp_hours(direct_vm, SCAR_HOURS + 3)            # hours start 84, 82, 80 — all in band
+    pet.pet()
+    assert int(pet.get_state()["health_regen_acc"]) == 3
+
+    warp_hours(direct_vm, SCAR_HOURS + 4)            # this one starts at 78
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["health_regen_acc"]) == 0
+    assert int(s["health"]) == 90
+
+    _feed(pet, direct_vm, 10 * WEI_PER_SATIETY)      # 76 -> 86, mends one more
+    assert int(pet.get_state()["health"]) == 91
+
+    warp_hours(direct_vm, SCAR_HOURS + 5)            # one band hour, from an empty bank
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["health_regen_acc"]) == 1           # 1, not 4
+    assert int(s["health"]) == 91                    # so no bonus point
+
+
+def test_well_fed_idle_heals_one_hp_per_HEALTH_REGEN_HOURS(direct_vm, direct_deploy):
+    pet = _full_tank(direct_vm, direct_deploy)
+    warp_hours(direct_vm, SCAR_HOURS + HEALTH_REGEN_HOURS - 1)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["health"]) == 90                          # three well-fed hours buy nothing
+    assert int(s["health_regen_acc"]) == HEALTH_REGEN_HOURS - 1
+
+    warp_hours(direct_vm, SCAR_HOURS + HEALTH_REGEN_HOURS)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["health"]) == 91                          # the fourth pays out
+    assert int(s["health_regen_acc"]) == 0                 # and the bank starts over
+
+
+def test_health_regen_remainder_survives_an_action(direct_vm, direct_deploy):
+    """_finish must never clear the bank — a pet is not healed by being poked.
+
+    This is the same shape as the decay cursor's remainder, and the same failure:
+    reset the counter on every write and a player who acts often enough gets
+    free health, while one who acts rarely gets none.
+    """
+    pet = _full_tank(direct_vm, direct_deploy)
+    warp_hours(direct_vm, SCAR_HOURS + 3)
+    pet.pet()
+    assert int(pet.get_state()["health_regen_acc"]) == 3
+
+    pet.pet()                                              # more writes, no time passing
+    pet.pet()
+    assert int(pet.get_state()["health_regen_acc"]) == 3
+
+    warp_hours(direct_vm, SCAR_HOURS + 4)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["health"]) == 91
+    assert int(s["health_regen_acc"]) == 0
+
+
+def test_starving_clears_health_regen_acc(direct_vm, direct_deploy):
+    """No bank survives a starving stretch, however well the pet started.
+
+    Satiety cannot fall from the regen band into starvation inside one hour at
+    these rates, so today the middle band always clears the counter first and the
+    `acc = 0` in the starving branch is belt-and-braces. It stops being so the
+    moment a stage table lets satiety drop faster, which is why the invariant —
+    not the branch — is what this asserts.
+    """
+    pet = _full_tank(direct_vm, direct_deploy)
+    warp_hours(direct_vm, SCAR_HOURS + 50)
+    pet.pet()
+    s = pet.get_state()
+    # 11 band hours (+2 HP, health 92), 30 in the middle, then hours 42..50 start
+    # under STARVE_SATIETY: nine of them, one point each.
+    assert int(s["satiety"]) == 0
+    assert int(s["health"]) == 83
+    assert int(s["health_regen_acc"]) == 0
+    assert s["alive"] is True
+
+
+def test_a_substantial_feed_heals_one_hp_only_when_well_fed(direct_vm, direct_deploy):
+    """Both conditions, separately: a big enough meal AND a well-fed pet after it.
+
+    0.10 GEN into a starving pet is a snack, not care — the point of the scar is
+    that it cannot be bought off in one transaction from the bottom.
+    """
+    pet = _scarred(direct_vm, direct_deploy)                        # health 89, satiety 0
+
+    _feed(pet, direct_vm, HEALTH_FEED_GAIN_MIN * WEI_PER_SATIETY)   # 0 -> 10
+    s = pet.get_state()
+    assert int(s["satiety"]) == 10
+    assert int(s["health"]) == 89          # big enough meal, nowhere near the band
+
+    _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)                     # 10 -> 60
+    _feed(pet, direct_vm, 15 * WEI_PER_SATIETY)                     # 60 -> 75, still short
+    assert int(pet.get_state()["health"]) == 89
+
+    _feed(pet, direct_vm, HEALTH_FEED_GAIN_MIN * WEI_PER_SATIETY)   # 75 -> 85: both hold
+    assert int(pet.get_state()["health"]) == 90
+
+    _feed(pet, direct_vm, 5 * WEI_PER_SATIETY)                      # well fed, but a snack
+    s = pet.get_state()
+    assert int(s["satiety"]) == 90
+    assert int(s["health"]) == 90
+
+
+def test_a_cap_feed_still_heals_only_one_hp(direct_vm, direct_deploy):
+    """HEALTH_FEED_HEAL, not the gain. Money buys satiety; only time buys health."""
+    pet = _scarred(direct_vm, direct_deploy)
+    _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)
+    _feed(pet, direct_vm, 500 * WEI_PER_SATIETY)   # gain capped at FEED_CAP -> satiety 100
+    s = pet.get_state()
+    assert int(s["satiety"]) == 100
+    assert int(s["health"]) == 90                  # +1, not +50
+
+
+def test_freezing_still_chips_health_on_check(direct_vm, direct_deploy):
+    """_apply_world's cold chip survives the rewrite, and is charged exactly once."""
+    pet = _scarred(direct_vm, direct_deploy)       # health 89, cursor on the hour
+    direct_vm.clear_mocks()                        # mocks stack; start clean
+    _mock_weather(direct_vm, code=3, temp=-5.0)    # cloudy, so only the cold moves anything
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Cold.", "mood_delta": 0}))
+    pet.check()
+    s = pet.get_state()
+    assert int(s["health"]) == 88
+    assert int(s["health_regen_acc"]) == 0         # no hour was billed, so nothing was banked
+
+
+def test_decay_over_DECAY_BILL_CAP_kills(direct_vm, direct_deploy):
+    """A decade of neglect is death, not a loop nobody can afford to run.
+
+    Past DECAY_BILL_CAP billed hours _decay stops walking and writes the answer
+    it would have reached anyway. Giving up and billing nothing instead would
+    leave an abandoned pet alive and perfect forever, which is precisely the
+    outcome the whole mechanic exists to prevent.
+    """
+    # NB: no mock_llm — a dying pet must not reach the LLM at all
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    warp_hours(direct_vm, 100_000)                 # ~11 years, 500x the cap
+    last = pet.pet()
+    s = pet.get_state()
+    assert s["alive"] is False
+    assert int(s["health"]) == 0
+    assert int(s["satiety"]) == 0
+    assert int(s["mood"]) == 0
+    assert int(s["health_regen_acc"]) == 0
+    assert "went quiet from neglect" in last
+
+
+class _FakeClock:
+    """The two storage reads `_age_days_at_billed_hour` makes, and nothing else.
+
+    The helper is a method because PR3 will call it from inside _decay, but the
+    only state it touches is birth_ts and the elapsed-seconds reading — so it can
+    be exercised against a stand-in without a deployed pet, which is the only way
+    to reach a private method from out here.
+    """
+
+    birth_ts = 0
+
+    def __init__(self, elapsed):
+        self._value = elapsed
+
+    def _elapsed(self, since_ts):
+        return self._value
+
+
+def test_age_at_a_billed_hour_walks_back_past_the_unbilled_leftover(direct_deploy):
+    """The age used for an hour is the age at the START of that hour.
+
+    Nothing calls this yet — PR3's per-stage hunger rates are its first caller —
+    but the arithmetic is the kind that is invisible when wrong: the `leftover`
+    seconds have already passed and have NOT been billed, so they sit between the
+    last billed hour and now. Forget to subtract them and every hour's age is
+    overstated by up to an hour, which at a stage boundary is not a rounding
+    error but the wrong rate table for the whole bill.
+    """
+    mod = _contract_module(direct_deploy)
+    at = mod.AiPet._age_days_at_billed_hour
+
+    # Three days old by a thousand seconds, one hour billed, half an hour unbilled.
+    clock = _FakeClock(3 * 86400 + 1000)
+    assert at(clock, 1, 0, 1800) == 2
+    assert at(clock, 1, 1, 1800) == 2      # still 2 — dropping the leftover would say 3
+
+    # A birthday that lands mid-bill: five hours billed, the boundary between the
+    # fifth and the last.
+    clock = _FakeClock(3 * 86400 + 1000)
+    assert at(clock, 5, 0, 1000) == 2
+    assert at(clock, 5, 4, 1000) == 2
+    assert at(clock, 5, 5, 1000) == 3
+
+    # And it floors at 0 rather than going negative on a pet younger than the bill.
+    assert at(_FakeClock(3600), 10, 0, 0) == 0
+
+
+def _slowest_rates(mod):
+    """The kindest hunger and starve rates the constants in force allow.
+
+    PR3 gives every life stage its own row in STAGE_RULES; taking the minimum
+    across the table keeps the derivation below honest without teaching it more
+    about the table than "hunger is [1], starve is [2]". If that shape ever
+    changes this raises, which is the point — a silent fallback to the flat rates
+    would measure the wrong thing and still pass.
+    """
+    rules = getattr(mod, "STAGE_RULES", None)
+    if rules:
+        return (min(int(r[1]) for r in rules.values()),
+                min(int(r[2]) for r in rules.values()))
+    return int(mod.SATIETY_PER_HOUR), int(mod.STARVE_HEALTH_PER_HOUR)
+
+
+def _hours_survived(mod, hunger, starve, sat, health, acc):
+    """Walk _decay's hour loop here, at the rates in force. Returns hours to death.
+
+    Deliberately a second implementation rather than a call into the contract:
+    the whole value of the assertion is that two independent readings of the same
+    constants agree on when a pet dies.
+    """
+    cap = int(mod.DECAY_BILL_CAP)
+    hours = 0
+    while health > 0 and hours <= cap:
+        if sat < mod.STARVE_SATIETY:
+            health = max(0, health - starve)
+            acc = 0
+        elif sat >= mod.HEALTH_REGEN_SATIETY:
+            acc += 1
+            if acc >= mod.HEALTH_REGEN_HOURS:
+                acc = 0
+                if health < mod.HATCH_HEALTH:
+                    health += 1
+        else:
+            acc = 0
+        sat = max(0, sat - hunger)
+        hours += 1
+    return hours
+
+
+def test_worst_case_death_clock_is_under_DECAY_BILL_CAP(direct_deploy):
+    """Correction C4: the gas cap must never become a longevity ceiling.
+
+    DECAY_BILL_CAP exists so one _decay cannot run out of gas, and it is only
+    sound while every pet dies before reaching it. Tune the rates kindly enough —
+    slower hunger, faster regen — and the cap silently becomes the rule that
+    kills pets instead, at a hard 200 hours, with no warning anywhere. Derived
+    from the constants rather than pinned to today's 126 so that a future rate
+    change fails HERE, in a test that explains itself, rather than in a demo.
+    """
+    mod = _contract_module(direct_deploy)
+    hunger, starve = _slowest_rates(mod)
+    cap = int(mod.DECAY_BILL_CAP)
+
+    worst, worst_start = 0, None
+    for sat in range(0, 101, 5):
+        for health in (1, 25, 50, 75, 90, 95, 96, 97, 98, 99, 100):
+            for acc in range(int(mod.HEALTH_REGEN_HOURS)):
+                hours = _hours_survived(mod, hunger, starve, sat, health, acc)
+                assert hours <= cap, (
+                    f"a pet starting at satiety {sat}, health {health}, bank {acc} "
+                    f"outlives DECAY_BILL_CAP — the cap, not starvation, is now "
+                    f"what kills it"
+                )
+                if hours > worst:
+                    worst, worst_start = hours, (sat, health, acc)
+    assert worst < cap, f"worst survivable span {worst} h from {worst_start}, cap {cap}"
 
 
 # --------------------------- the decay cursor -------------------------------

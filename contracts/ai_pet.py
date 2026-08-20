@@ -31,6 +31,40 @@ WEI_PER_SATIETY = 10 ** 16  # 0.01 GEN of food == +1 satiety
 FEED_CAP = 50               # max satiety gained from a single feed
 REVIVE_COST = 10 ** 18      # 1 GEN to bring a dead pet back
 
+# Starting and revival stats. These were bare literals in __init__ and revive();
+# the hour-by-hour walker in _decay has to reason about exactly the same numbers,
+# and a rate table that disagrees with the numbers it drifts from is a bug that
+# only shows up as an arithmetic surprise three PRs later.
+HATCH_SATIETY = 70
+HATCH_MOOD = 70
+HATCH_HEALTH = 100
+REVIVE_HEALTH = 60          # comes back weakened, not brand new
+REVIVE_SATIETY = 50
+REVIVE_MOOD = 50
+FEED_MOOD = 5               # mood a feed buys, whatever its size
+
+# --- health: a scar that heals slowly -------------------------------------- #
+# Health used to be a one-way ratchet: ten late hours were carried to the grave
+# and the only cure was dying and paying REVIVE_COST. That made the third meter a
+# countdown to a paid restart rather than something care could move. It now
+# heals, but far slower than it bleeds — one point per HEALTH_REGEN_HOURS spent
+# well fed, against one point per starving hour. Neglect is still cheaper to
+# cause than to undo, which is the whole point of a scar.
+STARVE_SATIETY = 20         # hour-START satiety BELOW which health bleeds
+STARVE_HEALTH_PER_HOUR = 1
+HEALTH_REGEN_SATIETY = 80   # hour-START satiety at or above which health mends
+HEALTH_REGEN_HOURS = 4      # well-fed billed hours per point of health
+HEALTH_FEED_GAIN_MIN = 10   # a meal smaller than this never heals
+HEALTH_FEED_HEAL = 1        # and one that does heals exactly this much, never more
+
+# The gas ceiling on a single _decay. A year of neglect must not become a loop
+# nobody can afford to run — past this many billed hours the pet is simply dead.
+# Safe only because it sits well above the longest span any pet can survive
+# untended; test_worst_case_death_clock_is_under_DECAY_BILL_CAP pins that, so a
+# future rate change fails there instead of silently turning a gas cap into a
+# longevity ceiling.
+DECAY_BILL_CAP = 200
+
 # Socialising. The cooldown is what stops two pets from pumping each other's
 # mood to 100 by trading visits in a loop — after the first one, the same
 # counterparty stops paying out until this many virtual hours have passed.
@@ -528,6 +562,8 @@ class AiPet(gl.Contract):
     last_evolved_ts: u256          # real ts of the last nudge (0 = never)
     evolutions: u256               # how many times the character has moved
     evolving: bool                 # owner's switch: may experience change it?
+    # --- health regen (see _decay) ---
+    health_regen_acc: u256         # well-fed billed hours banked toward +1 health
 
     # ---- constructor (private, no decorator) ----
     def __init__(self, name: str, persona: str, city: str, time_scale: int = 1,
@@ -558,9 +594,10 @@ class AiPet(gl.Contract):
         self.name = name
         self.persona = persona
         self.city = city
-        self.satiety = u256(70)
-        self.mood = u256(70)
-        self.health = u256(100)
+        self.satiety = u256(HATCH_SATIETY)
+        self.mood = u256(HATCH_MOOD)
+        self.health = u256(HATCH_HEALTH)
+        self.health_regen_acc = u256(0)
         now = _now()
         self.birth_ts = u256(now)
         self.last_interaction_ts = u256(now)
@@ -610,24 +647,98 @@ class AiPet(gl.Contract):
         permanent mood of 100 and never lose a point of satiety, never age into
         starvation, and never need anyone to buy it food. Measured: 12 free
         pet() calls across 11.8 virtual hours left satiety at its initial 70.
+
+        THE HOURS ARE BILLED ONE AT A TIME, and that is not a refactor of the
+        old lump arithmetic — it is a different answer. The lump form subtracted
+        every idle hour of hunger in one go, looked at the satiety that was LEFT,
+        and if it was under STARVE_SATIETY charged health for ALL of the idle
+        hours. Thirty idle hours from a fresh hatch therefore cost 30 health,
+        when only the last four of them were actually hungry. Walking the hours
+        charges each one at the state it really had: same thirty hours, 4 health.
+
+        Satiety is read at the START of each hour, before that hour's hunger. A
+        pet that begins an hour at exactly STARVE_SATIETY ate recently enough not
+        to be starving through it; billing hunger first would make every
+        threshold arrive a whole hour early.
+
+        A pet that is already at health 0 when this runs — which only
+        _apply_world's freezing chip can do — dies here on the next write, with
+        no further hunger billed. That is deliberate: health 0 has always meant
+        dead, and the old code simply had no path that noticed.
         """
         cursor = int(self.last_interaction_ts)
         elapsed = self._elapsed(cursor)
         idle_h = elapsed // 3600
-        if idle_h > 0:
-            self.satiety = _clamp(int(self.satiety) - idle_h * SATIETY_PER_HOUR)
-            self.mood = _clamp(int(self.mood) - idle_h * MOOD_PER_HOUR)
-            # starving -> health suffers
-            if int(self.satiety) < 20:
-                self.health = _clamp(int(self.health) - idle_h)
-            # Consume what was billed and keep the rest. Back off from now by the
-            # unbilled remainder rather than adding to the cursor, so the arithmetic
-            # stays exact at time_scale 1 (where the remainder is already real
-            # seconds) instead of dividing 3600 by the scale and losing the odd one.
-            leftover = elapsed - idle_h * 3600
-            self.last_interaction_ts = u256(_now() - leftover // int(self.time_scale))
-            if int(self.health) == 0:
-                self._die()
+        if idle_h == 0:
+            return 0
+        # Consume what was billed and keep the rest. Back off from now by the
+        # unbilled remainder rather than adding to the cursor, so the arithmetic
+        # stays exact at time_scale 1 (where the remainder is already real
+        # seconds) instead of dividing 3600 by the scale and losing the odd one.
+        leftover = elapsed - idle_h * 3600
+        stamp = u256(_now() - leftover // int(self.time_scale))
+
+        if idle_h > DECAY_BILL_CAP:
+            # A year of neglect. Playing it out hour by hour is a loop nobody can
+            # pay for, and the answer at the end is the same one anyway: the cap
+            # sits far above the longest span a pet can survive untended, so
+            # every path through here ends in a corpse. The alternative — give up
+            # and bill nothing — would leave an abandoned pet alive and perfect
+            # forever, which is the one outcome the whole mechanic exists to
+            # prevent.
+            self.satiety = u256(0)
+            self.mood = u256(0)
+            self.health = u256(0)
+            self.health_regen_acc = u256(0)
+            self.last_interaction_ts = stamp
+            self._die()
+            return idle_h
+
+        # Storage is read ONCE here and written ONCE below. Up to DECAY_BILL_CAP
+        # iterations times six storage operations each is the difference between
+        # a cheap action and one that runs out of gas; inside the loop these are
+        # plain ints, and nothing reads or writes a field.
+        sat = int(self.satiety)
+        mood = int(self.mood)
+        health = int(self.health)
+        acc = int(self.health_regen_acc)
+
+        for _ in range(idle_h):
+            if health == 0:
+                break
+            if sat < STARVE_SATIETY:
+                health -= STARVE_HEALTH_PER_HOUR
+                if health < 0:
+                    health = 0
+                acc = 0
+            elif sat >= HEALTH_REGEN_SATIETY:
+                acc += 1
+                if acc >= HEALTH_REGEN_HOURS:
+                    acc = 0
+                    if health < HATCH_HEALTH:
+                        health += 1
+            else:
+                # The middle band, STARVE_SATIETY..HEALTH_REGEN_SATIETY-1: no
+                # bleed, and no banking either. A remainder carried through a
+                # slump would let three well-fed hours, a crash to 50 and a
+                # single refill produce a point of health out of nowhere.
+                acc = 0
+            sat -= SATIETY_PER_HOUR
+            if sat < 0:
+                sat = 0
+            mood -= MOOD_PER_HOUR
+            if mood < 0:
+                mood = 0
+
+        self.satiety = u256(sat)
+        self.mood = u256(mood)
+        self.health = u256(health)
+        self.health_regen_acc = u256(acc)
+        self.last_interaction_ts = stamp
+        # _die() writes mood and a history line, so the flush above has to happen
+        # FIRST — flushing afterwards would overwrite the death it just announced.
+        if health == 0:
+            self._die()
         return idle_h
 
     def _die(self) -> None:
@@ -674,7 +785,14 @@ class AiPet(gl.Contract):
         if gain > FEED_CAP:
             gain = FEED_CAP
         self.satiety = _clamp(int(self.satiety) + gain)
-        self.mood = _clamp(int(self.mood) + 5)
+        self.mood = _clamp(int(self.mood) + FEED_MOOD)
+        # A real meal mends a point of the scar, but only if it actually lands
+        # the pet in the well-fed band: 0.10 GEN into a starving pet (gain 10,
+        # satiety 5 -> 15) is a snack, not care. Deliberately +HEALTH_FEED_HEAL
+        # and not +gain — a FEED_CAP meal heals exactly as much as a modest one,
+        # so health cannot be bought back in one transaction.
+        if gain >= HEALTH_FEED_GAIN_MIN and int(self.satiety) >= HEALTH_REGEN_SATIETY:
+            self.health = _clamp(int(self.health) + HEALTH_FEED_HEAL)
         return gain
 
     def _credit_feeder(self, who: Address, amount: int) -> None:
@@ -697,6 +815,25 @@ class AiPet(gl.Contract):
 
     def _age_days(self) -> int:
         return self._elapsed(int(self.birth_ts)) // 86400
+
+    def _age_days_at_billed_hour(self, idle_h: int, billed: int, leftover: int) -> int:
+        """Age in days at the START of billed hour `billed` (0-indexed).
+
+        Every rate in this contract is about to become a function of life stage,
+        and a pet that ages in the middle of a long bill has to be charged at the
+        rate it HAD during each hour, not the one it happens to have now. That
+        means walking backwards from the present: at the start of hour `billed`
+        there were still (idle_h - billed) whole hours to come, plus `leftover`.
+
+        Subtracting `leftover` is the part that is easy to forget and impossible
+        to notice. Those are seconds that have already passed but have NOT been
+        billed — they sit between the last billed hour and now. Leave them in and
+        every hour's age is overstated by up to an hour, which at a stage
+        boundary is not a rounding error but the wrong rate table.
+        """
+        ahead = (idle_h - billed) * 3600 + leftover
+        age = self._elapsed(int(self.birth_ts)) - ahead
+        return age // 86400 if age > 0 else 0
 
     def _snapshot(self, idle_hours: int) -> dict:
         """Flat state snapshot for prompt building (ordinary code, not non-det)."""
@@ -1154,9 +1291,11 @@ class AiPet(gl.Contract):
         self.died_ts = u256(0)
         self.revives = u256(int(self.revives) + 1)
         # comes back weakened, not brand new — dying has a cost
-        self.health = u256(60)
-        self.satiety = u256(50)
-        self.mood = u256(50)
+        self.health = u256(REVIVE_HEALTH)
+        self.satiety = u256(REVIVE_SATIETY)
+        self.mood = u256(REVIVE_MOOD)
+        # a new life banks its own well-fed hours; the corpse's do not carry over
+        self.health_regen_acc = u256(0)
         self.total_fed = u256(int(self.total_fed) + value)
         self._credit_feeder(gl.message.sender_address, value)
         # restart the decay clock so the revive isn't instantly undone
@@ -1292,6 +1431,9 @@ class AiPet(gl.Contract):
             "market": str(self.last_market),
             # what living has added to the persona, rendered from counters
             "character": self._character(),
+            # well-fed hours banked toward the next point of health, so a client
+            # can show "healing" honestly instead of guessing from the meters
+            "health_regen_acc": int(self.health_regen_acc),
         }
 
     @gl.public.view
