@@ -9,10 +9,14 @@ state transitions, so it doubles as a test (silent without -s).
 """
 
 import json
+import os
 
 from tests.direct.conftest import warp_hours
 
-CONTRACT = "contracts/ai_pet.py"
+# Same override as tests/direct/test_ai_pet.py: what is deployed is the stripped
+# artifact, so `AIPET_CONTRACT=build/ai_pet.py pytest tests/direct/` has to point
+# this file at it too, or the "test what deploys" run quietly skips the demo.
+CONTRACT = os.environ.get("AIPET_CONTRACT", "contracts/ai_pet.py")
 CTOR = ("Pixel", "a sleepy philosopher cat who speaks in riddles", "Lisbon")
 GEN = 10 ** 18
 
@@ -63,12 +67,14 @@ def test_demo(direct_vm, direct_deploy):
     assert int(pet.get_state()["total_fed_wei"]) == 5 * 10 ** 17
     assert int(pet.get_state()["satiety"]) == 100        # 70 + clamp(50) cap
 
-    # --- play(): mood up, satiety down ---
+    # --- a day passes and the egg hatches; only then can it play ---
     direct_vm.clear_mocks()
     direct_vm.mock_llm(r".*", json.dumps(
         {"quote": "A chase! For a moment I forget I am made of state and storage.", "mood_delta": 1}))
-    pet.play()
-    _show("play()  — fun, but it burns satiety", pet)
+    warp_hours(direct_vm, 24)                            # egg -> hatchling
+    pet.play()                                           # also settles those 24 egg hours
+    _show("play()  — a day older, hatched, and off the leash", pet)
+    assert pet.get_state()["stage"] == "hatchling"
 
     # --- pet(): a gentle boost ---
     direct_vm.clear_mocks()
@@ -79,7 +85,7 @@ def test_demo(direct_vm, direct_deploy):
 
     # --- neglect: nobody shows up for ~6 days and the pet starves to death ---
     direct_vm.clear_mocks()
-    warp_hours(direct_vm, 150)
+    warp_hours(direct_vm, 150)                           # 126 more idle hours
     pet.pet()                                            # the visit that arrives too late
     _show("neglect — 150 h without a visit", pet)
     assert pet.get_state()["alive"] is False

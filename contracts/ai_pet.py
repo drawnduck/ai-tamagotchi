@@ -88,7 +88,7 @@ PET_MOOD = 2                # comfort, not a mood pump
 PET_MOOD_CAP = 80           # the ceiling pet()'s own bump may reach
 PLAY_MOOD = 10              # play is the only mechanical way past that ceiling
 PLAY_SATIETY = 8            # and food is what it charges for the privilege
-PLAY_MOOD_ELDER = 5         # an old pet tires faster (used by the stage table in PR 3)
+PLAY_MOOD_ELDER = 5         # an old pet enjoys the same romp half as much
 
 # Socialising. The cooldown is what stops two pets from pumping each other's
 # mood to 100 by trading visits in a loop — after the first one, the same
@@ -137,6 +137,45 @@ LIFE_STAGES = (
     (1, "hatchling"),
     (0, "egg"),
 )
+
+# The same five stages in youngest-first order, which is the order a GUARD needs
+# and the exact reverse of the lookup order above. Two tuples of the same five
+# words is the price of not storing a stage: `_stage` stays a pure function of
+# age, so there is no field to migrate, no ritual to perform, and no way for the
+# stored stage and the real age to ever disagree.
+STAGE_ORDER = ("egg", "hatchling", "kitten", "adult", "elder")
+
+# Life stages used to be a sprite and a tone of voice: an egg and an elder ate at
+# the same rate and could do the same things, so "growing up" changed nothing a
+# player could feel. These two tables give the stages teeth.
+#
+# An egg lives off its yolk, so it barely eats. A kitten is growing and eats
+# half again as much as an adult. An elder eats least of all but takes hunger
+# twice as hard — old age is not a discount, it is a narrower margin. Every rate
+# is a whole number: _decay walks integers and a float would drift.
+#
+# SATIETY_PER_HOUR stays the single home of "2"; the two stages that drift at
+# the ordinary rate point at it rather than repeating the number.
+STAGE_SATIETY_PER_HOUR = {
+    "egg": 1,
+    "hatchling": SATIETY_PER_HOUR,
+    "kitten": 3,
+    "adult": SATIETY_PER_HOUR,
+    "elder": 1,
+}
+STAGE_STARVE_PER_HOUR = {
+    "egg": STARVE_HEALTH_PER_HOUR,
+    "hatchling": STARVE_HEALTH_PER_HOUR,
+    "kitten": STARVE_HEALTH_PER_HOUR,
+    "adult": STARVE_HEALTH_PER_HOUR,
+    "elder": 2,
+}
+
+# What a pet has to have grown into before it may do a thing. Named stages, not
+# `== "egg"` comparisons, so that inserting a stage between egg and hatchling
+# later moves every gate with it instead of leaving five literals behind.
+STAGE_MIN_PLAY = "hatchling"    # an egg cannot romp; it has not hatched
+STAGE_MIN_VISIT = "kitten"      # and it cannot walk to a neighbour either
 
 
 # --------------------------------------------------------------------------- #
@@ -295,6 +334,43 @@ def _stage(age_days: int) -> str:
         if age_days >= threshold:
             return label
     return "egg"
+
+
+def _stage_rank(stage: str) -> int:
+    """Position in STAGE_ORDER, so two stages can be compared with `<`.
+
+    An unknown word ranks as an egg rather than raising. The only strings that
+    reach here are `_stage`'s own output — but `visit` also reads a NEIGHBOUR's
+    stage out of another contract's `get_state`, and a hostile or simply older
+    neighbour is free to report anything at all. Ranking a stranger's word as the
+    youngest stage fails closed; a KeyError would let a neighbour brick a visit.
+    """
+    return STAGE_ORDER.index(stage) if stage in STAGE_ORDER else 0
+
+
+def _age_days_at_billed_hour(age_secs: int, idle_h: int, billed: int, leftover: int) -> int:
+    """Age in days at the START of billed hour `billed` (0-indexed).
+
+    Every rate below is a function of life stage, and a pet that ages in the
+    middle of a long bill has to be charged at the rate it HAD during each hour,
+    not the one it happens to have now. That means walking backwards from the
+    present: at the start of hour `billed` there were still (idle_h - billed)
+    whole hours to come, plus `leftover`.
+
+    Subtracting `leftover` is the part that is easy to forget and impossible to
+    notice. Those are seconds that have already passed but have NOT been billed —
+    they sit between the last billed hour and now. Leave them in and every hour's
+    age is overstated by up to an hour, which at a stage boundary is not a
+    rounding error but the wrong rate table for the rest of the bill.
+
+    `age_secs` is passed in rather than read, and that is correction C2 in one
+    line: this runs once per billed hour, up to DECAY_BILL_CAP times, and reading
+    birth_ts and time_scale out of storage on every iteration is exactly the gas
+    profile the hour loop exists to avoid.
+    """
+    ahead = (idle_h - billed) * 3600 + leftover
+    age = age_secs - ahead
+    return age // 86400 if age > 0 else 0
 
 
 def _character_phrase(levels: list) -> str:
@@ -690,6 +766,14 @@ class AiPet(gl.Contract):
         _apply_world's freezing chip can do — dies here on the next write, with
         no further hunger billed. That is deliberate: health 0 has always meant
         dead, and the old code simply had no path that noticed.
+
+        Each hour is also billed at the rates of the life stage the pet was in
+        DURING that hour (STAGE_SATIETY_PER_HOUR / STAGE_STARVE_PER_HOUR), which
+        is why the loop carries an age and not just a counter. An owner who
+        leaves for a week comes back to a bill that was egg-priced while the pet
+        was an egg and kitten-priced once it was a kitten; settling the whole
+        absence at today's rate would make the pet's own birthday a thing worth
+        timing your neglect around.
         """
         cursor = int(self.last_interaction_ts)
         elapsed = self._elapsed(cursor)
@@ -727,12 +811,19 @@ class AiPet(gl.Contract):
         mood = int(self.mood)
         health = int(self.health)
         acc = int(self.health_regen_acc)
+        age_secs = self._elapsed(int(self.birth_ts))
 
-        for _ in range(idle_h):
+        for billed in range(idle_h):
             if health == 0:
                 break
+            # The rates belong to the stage the pet was in DURING this hour, not
+            # the stage it is in now. A pet that hatches or grows up mid-bill is
+            # charged egg rates for the egg hours and hatchling rates for the
+            # rest — anything else would let a long absence be settled entirely
+            # at whichever rate happened to be cheapest at the far end.
+            stage = _stage(_age_days_at_billed_hour(age_secs, idle_h, billed, leftover))
             if sat < STARVE_SATIETY:
-                health -= STARVE_HEALTH_PER_HOUR
+                health -= STAGE_STARVE_PER_HOUR[stage]
                 if health < 0:
                     health = 0
                 acc = 0
@@ -748,7 +839,7 @@ class AiPet(gl.Contract):
                 # slump would let three well-fed hours, a crash to 50 and a
                 # single refill produce a point of health out of nowhere.
                 acc = 0
-            sat -= SATIETY_PER_HOUR
+            sat -= STAGE_SATIETY_PER_HOUR[stage]
             if sat < 0:
                 sat = 0
             mood -= MOOD_PER_HOUR
@@ -840,25 +931,6 @@ class AiPet(gl.Contract):
 
     def _age_days(self) -> int:
         return self._elapsed(int(self.birth_ts)) // 86400
-
-    def _age_days_at_billed_hour(self, idle_h: int, billed: int, leftover: int) -> int:
-        """Age in days at the START of billed hour `billed` (0-indexed).
-
-        Every rate in this contract is about to become a function of life stage,
-        and a pet that ages in the middle of a long bill has to be charged at the
-        rate it HAD during each hour, not the one it happens to have now. That
-        means walking backwards from the present: at the start of hour `billed`
-        there were still (idle_h - billed) whole hours to come, plus `leftover`.
-
-        Subtracting `leftover` is the part that is easy to forget and impossible
-        to notice. Those are seconds that have already passed but have NOT been
-        billed — they sit between the last billed hour and now. Leave them in and
-        every hour's age is overstated by up to an hour, which at a stage
-        boundary is not a rounding error but the wrong rate table.
-        """
-        ahead = (idle_h - billed) * 3600 + leftover
-        age = self._elapsed(int(self.birth_ts)) - ahead
-        return age // 86400 if age > 0 else 0
 
     def _snapshot(self, idle_hours: int) -> dict:
         """Flat state snapshot for prompt building (ordinary code, not non-det)."""
@@ -1150,11 +1222,27 @@ class AiPet(gl.Contract):
         No cooldown and no ceiling beyond _clamp's 100 — play is deliberately the
         one mechanical route above PET_MOOD_CAP, and PLAY_SATIETY is the price of
         that route. The owner pays for mood in food.
+
+        An egg cannot play, and the guard sits below the death check on purpose.
+        A pet abandoned past its death clock is already a kitten by age, so the
+        order only matters for the reading: what an owner gets back from a
+        neglected pet must be the death line, never a chirpy "too young". The
+        guard is also below _tick, so an egg's play() reverts the whole
+        transaction — the idle time it just billed goes back with it and nobody
+        is charged decay for an action the contract refused.
+
+        An elder plays at PLAY_MOOD_ELDER: the romp is the same, the pet has
+        less of it in them.
         """
         idle_h, still_alive = self._tick()
         if not still_alive:
             return str(self.last_quote)
-        self.mood = _clamp(int(self.mood) + PLAY_MOOD)
+        stage = _stage(self._age_days())
+        if _stage_rank(stage) < _stage_rank(STAGE_MIN_PLAY):
+            raise gl.vm.UserError("too young to play — wait until you hatch")
+        self.mood = _clamp(
+            int(self.mood) + (PLAY_MOOD_ELDER if stage == "elder" else PLAY_MOOD)
+        )
         self.satiety = _clamp(int(self.satiety) - PLAY_SATIETY)
 
         snap = self._snapshot(idle_h)
@@ -1235,6 +1323,12 @@ class AiPet(gl.Contract):
         idle_h, still_alive = self._tick()
         if not still_alive:
             return str(self.last_quote)
+        # Below the death check for the same reason as play(), and ABOVE the
+        # cross-contract read below it: refusing before that read means a pet too
+        # young to travel never spends gas calling a stranger, and never tells a
+        # neighbour it was thinking about them.
+        if _stage_rank(_stage(self._age_days())) < _stage_rank(STAGE_MIN_VISIT):
+            raise gl.vm.UserError("too young to visit — wait until kitten")
 
         host = _neighbour_state(host_addr)          # also the authentication
         host_name = _sanitize(str(host.get("name", "")), FOREIGN_NAME_MAX) or "a stranger"
@@ -1293,6 +1387,11 @@ class AiPet(gl.Contract):
         stamp also means skipping `_tick()` — one charges idle time and the other
         clears it, and calling only the first would bill that same idle period
         twice on the next action.
+        
+        There is deliberately no age guard here either. An egg is too young to
+        walk to a neighbour, but old enough to be called on — visiting is the one
+        thing a pet can do FOR another pet, and locking it out of receiving would
+        leave the youngest pets, the ones with nothing else to do, alone.
         """
         guest = gl.message.sender_address
         if guest == self.address:

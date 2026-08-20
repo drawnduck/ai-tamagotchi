@@ -228,8 +228,27 @@ test("check() reads the live web, calls the LLM, and speaks", async () => {
   assert.equal((await read("get_history")).length, before + 1);
 });
 
-test("play() burns satiety", async () => {
-  const before = Number((await read("get_state")).satiety);
+// An egg cannot play (STAGE_MIN_PLAY == "hatchling"), and the pet this suite
+// deploys is a fresh one — see "a fresh pet is alive, unfed and still an egg"
+// above. Which branch runs therefore depends on how old the deployed pet is by
+// the time the suite reaches here, so both are asserted rather than one skipped.
+// This is also the half of test_play_on_egg_reverts_before_it_speaks that direct
+// mode cannot prove: GenVM rolls the whole transaction back, so the decay the
+// refused call had already billed goes back with it and satiety does not move.
+test("play() burns satiety, unless the pet is still an egg", async () => {
+  const s = await read("get_state");
+  const before = Number(s.satiety);
+
+  if (s.stage === "egg") {
+    await assert.rejects(send("play"), /too young/, "an egg must not be able to play");
+    assert.equal(
+      Number((await read("get_state")).satiety),
+      before,
+      "a refused play must not bill the idle time it just walked",
+    );
+    return;
+  }
+
   await send("play");
   assert.ok(
     Number((await read("get_state")).satiety) < before,

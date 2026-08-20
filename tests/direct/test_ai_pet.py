@@ -50,16 +50,33 @@ PLAY_MOOD = 10               # mirrors the contract constant
 PLAY_SATIETY = 8             # mirrors the contract constant
 HATCH_MOOD = 70              # mirrors the contract constant
 HATCH_SATIETY = 70           # mirrors the contract constant
+REVIVE_SATIETY = 50          # mirrors the contract constant
+REVIVE_MOOD = 50             # mirrors the contract constant
+REVIVE_HEALTH = 60           # mirrors the contract constant
+PLAY_MOOD_ELDER = 5          # mirrors the contract constant
+EGG_SATIETY_PER_HOUR = 1     # mirrors STAGE_SATIETY_PER_HOUR["egg"]
+KITTEN_SATIETY_PER_HOUR = 3  # mirrors STAGE_SATIETY_PER_HOUR["kitten"]
+ELDER_STARVE_PER_HOUR = 2    # mirrors STAGE_STARVE_PER_HOUR["elder"]
 
-# Idle hours that starve the pet all the way to health 0, with slack.
+# The exact hour a neglected hatch dies, now that every hour is billed at the
+# rates of the stage the pet was in DURING it. Walked out in full (and pinned by
+# test_a_neglected_hatch_dies_on_billed_hour_138):
 #
-# Decay is billed one hour at a time and each hour is judged by the satiety it
-# STARTS with: hour k starts at HATCH_SATIETY - 2(k-1), so the first hour that
-# starts under STARVE_SATIETY is k=27 (start 18) — hour 26 starts at exactly 20
-# and is still fed. Health then bleeds 1/h for 100 hours, so a neglected hatch
-# dies on billed hour 126 exactly (measured, not estimated). 150 is deliberate
-# slack so that a rate change moves the clock without silently un-killing every
-# test built on _kill().
+#   hours   1..24   egg,       hunger 1  -> satiety 70 -> 46, nothing starves
+#   hours  25..38   hatchling, hunger 2  -> satiety 46 -> 18; hour 38 STARTS at
+#                                           exactly 20, so it is still fed
+#   hours  39..72   hatchling, starving  -> 34 h x 1 HP -> health 66, satiety 0
+#   hours  73..138  kitten,    starving  -> 66 h x 1 HP -> health 0
+#
+# Under the flat pre-stage rates that answer was 126; the egg's slow yolk is
+# what buys the extra twelve hours.
+DEATH_IDLE_H = 138
+
+# Idle hours that starve the pet all the way to health 0, with slack. 150 is
+# deliberate slack over DEATH_IDLE_H so that a rate change moves the clock
+# without silently un-killing every test built on _kill(). Age at death is what
+# _kill's callers care about too: 150 h is 6 days, so a killed-and-revived pet
+# comes back a kitten.
 LETHAL_IDLE_H = 150
 
 
@@ -70,6 +87,53 @@ def _kill(direct_vm, direct_deploy):
     warp_hours(direct_vm, LETHAL_IDLE_H)
     pet.pet()          # the action itself applies the fatal drift
     assert pet.get_state()["alive"] is False
+    return pet
+
+
+def _revived(direct_vm, direct_deploy, idle_h):
+    """A pet aged past `idle_h` hours, killed by that neglect, and paid back up.
+
+    Age and idle time are the same clock: birth_ts and last_interaction_ts are
+    both stamped at deploy, so there is no way to warp a pet old enough to be a
+    kitten (or an elder) without also billing it for every one of those hours —
+    and after PR 3 those hours are billed at rates that change as it grows. That
+    makes "an old pet in a state a test knows exactly" impossible to reach by
+    warping alone.
+
+    revive() is the one thing in the contract that resets the decay cursor
+    without touching birth_ts, so the road to a healthy old pet runs through the
+    graveyard: neglect it well past DEATH_IDLE_H, pay the GEN, and it comes back
+    at REVIVE_SATIETY / REVIVE_MOOD / REVIVE_HEALTH with a fresh cursor and an
+    old birthday. Mocks are cleared on the way out so a caller's own stacked
+    mock_llm still wins.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    warp_hours(direct_vm, idle_h)
+    pet.pet()                                   # long dead; this is the burial
+    assert pet.get_state()["alive"] is False
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Back.", "mood_delta": 0}))
+    direct_vm.value = GEN
+    try:
+        pet.revive()
+    finally:
+        direct_vm.value = 0
+    direct_vm.clear_mocks()
+    return pet
+
+
+def _kitten(direct_vm, direct_deploy):
+    """A pet old enough to visit — see _revived. 150 idle h is 6 days."""
+    pet = _revived(direct_vm, direct_deploy, LETHAL_IDLE_H)
+    assert pet.get_state()["stage"] == "kitten"
+    return pet
+
+
+def _elder(direct_vm, direct_deploy):
+    """A pet past 30 days — see _revived. The warp is well over DECAY_BILL_CAP,
+    which is fine: the cap path kills too, and this pet is being killed."""
+    pet = _revived(direct_vm, direct_deploy, 30 * 24)
+    assert pet.get_state()["stage"] == "elder"
     return pet
 
 
@@ -137,16 +201,25 @@ def test_check_reads_weather_and_speaks(direct_vm, direct_deploy):
 
 
 def test_play_updates_state_and_speaks(direct_vm, direct_deploy):
+    """The pet has to hatch first — an egg cannot play (STAGE_MIN_PLAY).
+
+    The day that buys the hatching is not free: the very call that plays also
+    settles the 24 egg hours it was warped through, at the egg's own hunger of 1
+    and MOOD_PER_HOUR, before play() touches anything.
+    """
+    warp_hours(direct_vm, 0)
     pet = direct_deploy(CONTRACT, *CTOR)
     direct_vm.mock_llm(
         r".*",
         json.dumps({"quote": "Play is an illusion, but I enjoyed it.", "mood_delta": 0}),
     )
+    warp_days(direct_vm, 1)
     quote = pet.play()
     s = pet.get_state()
-    # play: mood +10 (70 -> 80), satiety -8 (70 -> 62), mood_delta 0
-    assert int(s["mood"]) == 80
-    assert int(s["satiety"]) == 62
+    # 24 egg hours first: mood 70 -> 46, satiety 70 -> 46. Then play: mood +10,
+    # satiety -8, mood_delta 0.
+    assert int(s["mood"]) == 56
+    assert int(s["satiety"]) == 38
     assert s["last_quote"] == "Play is an illusion, but I enjoyed it."
     assert quote == s["last_quote"]
     assert pet.get_history() == [s["last_quote"]]
@@ -260,12 +333,25 @@ def test_the_model_may_still_lift_mood_past_the_cap(direct_vm, direct_deploy):
 
 
 def test_play_can_push_mood_above_PET_MOOD_CAP(direct_vm, direct_deploy):
-    """play() is the one mechanical route past the cap, and it charges food."""
-    pet = _pet_to_the_cap(direct_vm, direct_deploy)
+    """play() is the one mechanical route past the cap, and it charges food.
+
+    Hatched first, because an egg cannot play at all — but the cap is the
+    subject here, not the stage, so the pet is petted up to it from wherever the
+    hatching day's decay left it rather than from HATCH_MOOD.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Mm.", "mood_delta": 0}))
+    warp_days(direct_vm, 1)
+    while int(pet.get_state()["mood"]) < PET_MOOD_CAP:
+        pet.pet()                       # the first press also settles the 24 egg hours
+    before = int(pet.get_state()["satiety"])
+    assert int(pet.get_state()["mood"]) == PET_MOOD_CAP
+
     pet.play()
     s = pet.get_state()
     assert int(s["mood"]) == PET_MOOD_CAP + PLAY_MOOD          # 90
-    assert int(s["satiety"]) == HATCH_SATIETY - PLAY_SATIETY   # 70 -> 62
+    assert int(s["satiety"]) == before - PLAY_SATIETY
 
 
 # ----------------------------- life stages ---------------------------------
@@ -282,6 +368,279 @@ def test_stage_progresses_with_age(direct_vm, direct_deploy):
         assert s["stage"] == expected
 
 
+# Life stages used to be a sprite and a tone of voice. PR 3 gave them teeth: two
+# rate tables and two locks. Everything below is about those five words meaning
+# something a player can feel.
+
+
+def test_the_egg_burns_its_yolk_slower_than_a_hatchling(direct_vm, direct_deploy):
+    """The whole point of a stage table: the same 30 hours cost different amounts.
+
+    Under the old flat rate those 30 hours cost 60 satiety and four of them
+    starved the pet. On the yolk they cost 24 and none of them do — 24 egg hours
+    at 1, then six hatchling hours at 2.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "I hunger.", "mood_delta": 0}))
+    warp_hours(direct_vm, 30)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["satiety"]) == 34          # 70 - 24*1 - 6*2, not 70 - 30*2
+    assert int(s["health"]) == 100          # nothing ever started under STARVE_SATIETY
+    assert s["stage"] == "hatchling"
+
+
+def test_a_bill_that_spans_a_birthday_is_charged_at_both_rates(direct_vm, direct_deploy):
+    """One call settling 30 hours must not pick a single rate for all of them.
+
+    Charging the whole absence at the stage the pet happens to be in NOW is the
+    bug this is here to catch, in both directions: 30 hatchling hours would be
+    70-60=10, 30 egg hours would be 70-30=40. The right answer is neither.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "mm", "mood_delta": 0}))
+    warp_hours(direct_vm, 30)
+    pet.pet()
+    satiety = int(pet.get_state()["satiety"])
+    assert satiety != 70 - 30 * 2           # not all hatchling
+    assert satiety != 70 - 30 * 1           # not all egg either
+    assert satiety == 34
+
+
+def test_an_elder_takes_hunger_twice_as_hard(direct_vm, direct_deploy):
+    """STAGE_STARVE_PER_HOUR: old age is a narrower margin, not a discount.
+
+    An elder eats least of anyone (hunger 1), so it takes 31 hours before an hour
+    even STARTS under STARVE_SATIETY — and then every one of those hours costs
+    two health instead of one.
+    """
+    pet = _elder(direct_vm, direct_deploy)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Hmph.", "mood_delta": 0}))
+    warp_hours(direct_vm, 30 * 24 + 45)
+    pet.pet()
+    s = pet.get_state()
+    assert int(s["satiety"]) == REVIVE_SATIETY - 45          # hunger 1, all 45 hours
+    # hours 32..45 start under STARVE_SATIETY: 14 of them, two health each
+    assert int(s["health"]) == REVIVE_HEALTH - 14 * ELDER_STARVE_PER_HOUR   # 32
+    assert int(s["health"]) != REVIVE_HEALTH - 14            # what an adult would pay
+    assert s["alive"] is True
+
+
+def test_a_neglected_hatch_survives_the_hour_before_the_death_clock(direct_vm, direct_deploy):
+    """One hour short of DEATH_IDLE_H the pet is alive on its last point of health.
+
+    The other half of the clock is a separate test only because direct mode
+    refuses to load the contract module twice in one test, and two pets is the
+    only honest way to compare two idle spans from the same hatch.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "One more hour.", "mood_delta": 0}))
+    warp_hours(direct_vm, DEATH_IDLE_H - 1)
+    pet.pet()
+    s = pet.get_state()
+    assert s["alive"] is True
+    assert int(s["health"]) == 1
+
+
+def test_a_neglected_hatch_dies_on_billed_hour_138(direct_vm, direct_deploy):
+    """The death clock, to the hour, walked out in DEATH_IDLE_H's comment.
+
+    Pinned exactly rather than approximately because it is the one number a
+    player experiences directly, and because the stage tables moved it: the same
+    pet died on billed hour 126 under the flat rates, and the twelve extra hours
+    are the egg's slow yolk.
+    """
+    # NB: no mock_llm — a dying pet must not reach the LLM at all
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    warp_hours(direct_vm, DEATH_IDLE_H)
+    last = pet.pet()
+    s = pet.get_state()
+    assert s["alive"] is False
+    assert int(s["health"]) == 0
+    assert "went quiet from neglect" in last
+    assert s["stage"] == "kitten"           # it died young, but not as an egg
+
+
+def test_egg_refuses_play_and_visit(direct_vm, direct_deploy, direct_owner, direct_bob):
+    """STAGE_MIN_PLAY and STAGE_MIN_VISIT, on the stage that fails both."""
+    warp_hours(direct_vm, 0)
+    direct_vm.sender = direct_owner
+    pet = direct_deploy(CONTRACT, *CTOR)
+    nb = Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "should not speak", "mood_delta": 0}))
+    assert pet.get_state()["stage"] == "egg"
+
+    with direct_vm.expect_revert("too young to play"):
+        pet.play()
+    with direct_vm.expect_revert("too young to visit"):
+        pet.visit(nb.address_hex)
+
+    # neither refusal reached the model or the neighbour, and neither left a line
+    assert pet.get_history() == []
+    assert nb.calls == [] and nb.messages == []
+
+
+def test_play_on_egg_reverts_before_it_speaks(direct_vm, direct_deploy):
+    """The guard sits below _tick, so on-chain the refusal un-bills the decay too.
+
+    MEASURED, and it is why this test asserts what it asserts: direct mode does
+    NOT roll storage back on a UserError — `expect_revert` catches the exception
+    and nothing else, so after the revert below the ten idle hours really are
+    gone from satiety here. On GenVM the whole transaction reverts and they are
+    not. The non-billing half of that claim therefore belongs to tests/network/;
+    what IS provable here is that the refusal happens before the pet speaks, and
+    that the pet is still an egg afterwards rather than half-played-with.
+
+    Moving the guard above _tick to make this assertable would be the wrong fix:
+    a pet abandoned past its death clock has to get the death line back, not
+    "too young" — see test_lethal_idle_play_returns_death_not_too_young.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "should not speak", "mood_delta": 0}))
+    warp_hours(direct_vm, 10)
+
+    with direct_vm.expect_revert("too young to play"):
+        pet.play()
+
+    s = pet.get_state()
+    assert s["stage"] == "egg"
+    assert s["last_quote"] == ""             # it never reached _speak
+    assert pet.get_history() == []
+    assert int(s["mood"]) == 70 - 10         # no PLAY_MOOD: only idle drift moved it
+
+
+def test_lethal_idle_play_returns_death_not_too_young(direct_vm, direct_deploy):
+    """Ordering, and the reason the stage guard is below the death check.
+
+    A pet left alone past DEATH_IDLE_H is a kitten by age, so this would pass
+    either way today — which is exactly why it is written against play() on a pet
+    that is BOTH dead and (at the moment of the last write) too young to have
+    played when it was left. What the owner must get back is the death line, in
+    the pet's own voice, not a chirp about hatching.
+    """
+    # NB: no mock_llm — a dying pet must not reach the LLM at all
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    warp_hours(direct_vm, DEATH_IDLE_H)
+
+    last = pet.play()
+    assert "went quiet from neglect" in last
+    assert "too young" not in last
+    assert pet.get_state()["alive"] is False
+
+    # and once it is a corpse every action is refused for being a corpse
+    with direct_vm.expect_revert("pet is dead"):
+        pet.play()
+
+
+def test_hatchling_can_play_but_not_visit(direct_vm, direct_deploy, direct_owner, direct_bob):
+    """The middle case: STAGE_MIN_PLAY is met, STAGE_MIN_VISIT is not."""
+    warp_hours(direct_vm, 0)
+    direct_vm.sender = direct_owner
+    pet = direct_deploy(CONTRACT, *CTOR)
+    nb = Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Romp!", "mood_delta": 0}))
+    warp_days(direct_vm, 1)
+    assert pet.get_state()["stage"] == "hatchling"
+
+    assert pet.play() == "Romp!"             # 24 egg hours settled, then it romps
+    s = pet.get_state()
+    assert int(s["mood"]) == 70 - 24 + PLAY_MOOD
+    assert int(s["satiety"]) == 70 - 24 - PLAY_SATIETY
+
+    with direct_vm.expect_revert("too young to visit"):
+        pet.visit(nb.address_hex)
+    assert nb.messages == []
+
+
+def test_kitten_can_visit(direct_vm, direct_deploy, direct_owner, direct_bob):
+    """STAGE_MIN_VISIT is a floor, not a window — a kitten and up may travel."""
+    direct_vm.sender = direct_owner
+    pet = _kitten(direct_vm, direct_deploy)
+    nb = Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Hello Kuzya.", "mood_delta": 0}))
+
+    assert pet.visit(nb.address_hex) == "Hello Kuzya."
+    assert len(nb.messages) == 1
+    assert pet.get_social()["visits_sent"] == 1
+
+
+def test_elder_play_mood_is_PLAY_MOOD_ELDER(direct_vm, direct_deploy):
+    """An old pet enjoys the same romp half as much, and pays the same food."""
+    pet = _elder(direct_vm, direct_deploy)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "If you insist.", "mood_delta": 0}))
+
+    pet.play()                               # no time has passed since the revive
+    s = pet.get_state()
+    assert int(s["mood"]) == REVIVE_MOOD + PLAY_MOOD_ELDER
+    assert int(s["mood"]) != REVIVE_MOOD + PLAY_MOOD
+    assert int(s["satiety"]) == REVIVE_SATIETY - PLAY_SATIETY   # the price is unchanged
+
+
+def test_egg_can_receive_a_guest(direct_vm, direct_deploy, direct_bob):
+    """Too young to call on anyone, old enough to be called on.
+
+    receive_visit deliberately has no age guard. Visiting is the one thing a pet
+    can do FOR another pet, and locking the youngest ones out of RECEIVING would
+    leave exactly the pets with nothing else to do sitting alone.
+    """
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+    Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
+    assert pet.get_state()["stage"] == "egg"
+
+    _greet(pet, direct_vm, direct_bob, "Hello in there.")
+
+    soc = pet.get_social()
+    assert soc["visits_received"] == 1
+    assert soc["pending_name"] == "Kuzya"
+    assert int(pet.get_state()["mood"]) == 70 + 2       # VISIT_MOOD_HOST
+
+
+def test_revive_near_7d_bills_kitten_hunger_not_adult(direct_vm, direct_deploy):
+    """The golden leftover case: an hour is charged for the stage it BEGAN in.
+
+    The pet is revived half an hour short of its seventh day, then left for 90
+    minutes. That bills exactly one hour and carries 1800 unbilled seconds — and
+    those 1800 seconds are the whole test. The billed hour STARTED at 6d 23h 30m,
+    while it was still a kitten, so it costs kitten hunger; by the time the write
+    lands `_age_days()` already reads 7 and `stage` already says adult.
+
+    Drop the leftover from _age_days_at_billed_hour and the hour is dated half an
+    hour into the pet's seventh day, charged at adult hunger, and nothing else in
+    the suite notices: the difference is a single point of satiety.
+
+    90 minutes and not 60, deliberately. At exactly one hour the leftover is 0
+    and the wrong arithmetic gives the right answer.
+    """
+    seven_days = 7 * 86400
+    warp_seconds(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    warp_seconds(direct_vm, seven_days - 1800)      # long dead by now
+    pet.pet()
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Back.", "mood_delta": 0}))
+    direct_vm.value = GEN
+    try:
+        pet.revive()                                # cursor restarts HERE, at 6d 23h 30m
+    finally:
+        direct_vm.value = 0
+    assert pet.get_state()["stage"] == "kitten"
+
+    warp_seconds(direct_vm, seven_days + 3600)      # 5400 s later: one hour + 1800 over
+    pet.pet()
+
+    s = pet.get_state()
+    assert int(s["age_days"]) == 7 and s["stage"] == "adult"
+    assert int(s["satiety"]) == REVIVE_SATIETY - KITTEN_SATIETY_PER_HOUR   # 47
+    assert int(s["satiety"]) != REVIVE_SATIETY - SATIETY_PER_HOUR          # 48, the bug
+
+
 # ------------------------------ death ---------------------------------------
 
 
@@ -289,19 +648,20 @@ def test_starving_costs_health_but_not_life(direct_vm, direct_deploy):
     warp_hours(direct_vm, 0)
     pet = direct_deploy(CONTRACT, *CTOR)
     direct_vm.mock_llm(r".*", json.dumps({"quote": "I hunger.", "mood_delta": 0}))
-    warp_hours(direct_vm, 30)
+    warp_hours(direct_vm, 50)
     pet.pet()
     s = pet.get_state()
-    # 30 idle h, billed one at a time: satiety 70-60=10, but only the hours that
-    # STARTED under STARVE_SATIETY cost health. Hour k starts at 70-2(k-1), so
-    # the first starving hour is k=27 — hour 26 starts at exactly 20 and is still
-    # fed. Four starving hours, not thirty: health 100-4=96.
+    # 50 idle h, billed one at a time at the rates of the stage each hour was
+    # actually lived in: 24 egg hours at 1 (70 -> 46), 14 hatchling hours at 2
+    # (46 -> 18; hour 38 STARTS at exactly 20 and is still fed), then hours
+    # 39..50 start under STARVE_SATIETY — twelve of them, one health each.
     #
-    # The old lump form checked the satiety that was LEFT after all 30 hours of
-    # hunger and then charged health for every one of them, which is how a pet
-    # that was hungry for four hours arrived at the vet 30 points down.
-    assert int(s["satiety"]) == 10
-    assert int(s["health"]) == 96
+    # The old lump form checked the satiety that was LEFT after all the hunger
+    # and then charged health for EVERY idle hour, which is how a pet that was
+    # hungry for twelve hours would arrive at the vet fifty points down.
+    assert int(s["satiety"]) == 0
+    assert int(s["health"]) == 88
+    assert s["alive"] is True
     assert s["alive"] is True
 
 
@@ -358,7 +718,8 @@ def test_a_feed_that_arrives_as_the_pet_dies_is_refunded(
 # on a healthy pet _clamp pins health at 100 and every "+1 HP" assertion passes
 # for the wrong reason.
 
-SCAR_HOURS = 37       # idle hours that bleed exactly 11 HP off a fresh hatch
+ADULT_H = 7 * 24      # the hour a pet's birthday makes it an adult
+SCAR_HOURS = ADULT_H + 25   # ...plus the starving hours that leave the scar
 
 
 def _feed(pet, direct_vm, wei):
@@ -371,33 +732,43 @@ def _feed(pet, direct_vm, wei):
 
 
 def _scarred(direct_vm, direct_deploy):
-    """A pet with a real scar and an empty stomach, on a clean hour boundary.
+    """An ADULT pet with a real scar and an empty stomach, on a clean hour boundary.
 
-    37 idle hours from a fresh hatch: the first hour that STARTS under
-    STARVE_SATIETY is k=27, so hours 27..37 are the starving ones — 11 of them,
-    health 100-11=89. No hour starts at HEALTH_REGEN_SATIETY or above, so
-    nothing is banked. The cursor lands exactly on hour 37 with no leftover,
-    which is what lets every warp after this one bill whole hours from a state
-    the test knows to the point.
+    Adult on purpose, and that is the only thing PR 3 changed here. Every rate in
+    _decay is now a function of life stage, but these tests are about the health
+    scar and not about growing up — an adult drifts at exactly the flat
+    SATIETY_PER_HOUR / STARVE_HEALTH_PER_HOUR this whole block was written
+    against, and stays adult for another 23 days, so no warp below can wander
+    into a different rate table halfway through. A fresh hatch could not do
+    either: it would change hunger twice inside the longest of these warps.
+
+    Getting there, via _revived: aged to 7 days (long dead — see DEATH_IDLE_H),
+    paid back up to REVIVE_* with a fresh cursor, then starved 25 adult hours.
+    Hours 1..16 of those start at 50, 48, ... 20 and are still fed; hours 17..25
+    start under STARVE_SATIETY, so nine of them bleed a point each: health
+    60-9=51, satiety 50-50=0. Nothing is ever banked — no hour starts at
+    HEALTH_REGEN_SATIETY or above. The cursor lands exactly on the hour with no
+    leftover, which is what lets every warp after this one bill whole hours from
+    a state the test knows to the point.
     """
-    warp_hours(direct_vm, 0)
-    pet = direct_deploy(CONTRACT, *CTOR)
+    pet = _revived(direct_vm, direct_deploy, ADULT_H)
+    assert pet.get_state()["stage"] == "adult"
     direct_vm.mock_llm(r".*", json.dumps({"quote": "I ache.", "mood_delta": 0}))
     warp_hours(direct_vm, SCAR_HOURS)
     pet.pet()
     s = pet.get_state()
-    assert (int(s["satiety"]), int(s["health"]), s["alive"]) == (0, 89, True)
+    assert (int(s["satiety"]), int(s["health"]), s["alive"]) == (0, 51, True)
     assert int(s["health_regen_acc"]) == 0
     return pet
 
 
 def _full_tank(direct_vm, direct_deploy):
-    """_scarred(), then fed to the brim: satiety 100, health 90, nothing banked."""
+    """_scarred(), then fed to the brim: satiety 100, health 52, nothing banked."""
     pet = _scarred(direct_vm, direct_deploy)
     _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)   # 0 -> 50: big meal, still not well fed
     _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)   # 50 -> 100: this one also mends a point
     s = pet.get_state()
-    assert (int(s["satiety"]), int(s["health"]), int(s["health_regen_acc"])) == (100, 90, 0)
+    assert (int(s["satiety"]), int(s["health"]), int(s["health_regen_acc"])) == (100, 52, 0)
     return pet
 
 
@@ -427,7 +798,7 @@ def test_full_tank_11h_heals_plus_2_hp_acc_3(direct_vm, direct_deploy):
     # HEALTH_REGEN_SATIETY. The bank tips on the 4th and the 8th, so two points,
     # and the 11th leaves three hours banked toward the next one.
     assert int(s["satiety"]) == 78
-    assert int(s["health"]) == 92
+    assert int(s["health"]) == 54
     assert int(s["health_regen_acc"]) == 3
 
 
@@ -443,7 +814,7 @@ def test_full_tank_40h_does_not_heal_10_hp(direct_vm, direct_deploy):
     pet.pet()
     s = pet.get_state()
     assert int(s["satiety"]) == 20
-    assert int(s["health"]) == 92          # +2, not +10
+    assert int(s["health"]) == 54          # +2, not +10
     assert int(s["health_regen_acc"]) == 0
 
 
@@ -477,7 +848,7 @@ def test_middle_band_clears_health_regen_acc(direct_vm, direct_deploy):
     pet = _scarred(direct_vm, direct_deploy)
     _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)
     _feed(pet, direct_vm, 34 * WEI_PER_SATIETY)      # satiety 84, and this meal mends one
-    assert (int(pet.get_state()["satiety"]), int(pet.get_state()["health"])) == (84, 90)
+    assert (int(pet.get_state()["satiety"]), int(pet.get_state()["health"])) == (84, 52)
 
     warp_hours(direct_vm, SCAR_HOURS + 3)            # hours start 84, 82, 80 — all in band
     pet.pet()
@@ -487,16 +858,16 @@ def test_middle_band_clears_health_regen_acc(direct_vm, direct_deploy):
     pet.pet()
     s = pet.get_state()
     assert int(s["health_regen_acc"]) == 0
-    assert int(s["health"]) == 90
+    assert int(s["health"]) == 52
 
     _feed(pet, direct_vm, 10 * WEI_PER_SATIETY)      # 76 -> 86, mends one more
-    assert int(pet.get_state()["health"]) == 91
+    assert int(pet.get_state()["health"]) == 53
 
     warp_hours(direct_vm, SCAR_HOURS + 5)            # one band hour, from an empty bank
     pet.pet()
     s = pet.get_state()
     assert int(s["health_regen_acc"]) == 1           # 1, not 4
-    assert int(s["health"]) == 91                    # so no bonus point
+    assert int(s["health"]) == 53                    # so no bonus point
 
 
 def test_well_fed_idle_heals_one_hp_per_HEALTH_REGEN_HOURS(direct_vm, direct_deploy):
@@ -504,13 +875,13 @@ def test_well_fed_idle_heals_one_hp_per_HEALTH_REGEN_HOURS(direct_vm, direct_dep
     warp_hours(direct_vm, SCAR_HOURS + HEALTH_REGEN_HOURS - 1)
     pet.pet()
     s = pet.get_state()
-    assert int(s["health"]) == 90                          # three well-fed hours buy nothing
+    assert int(s["health"]) == 52                          # three well-fed hours buy nothing
     assert int(s["health_regen_acc"]) == HEALTH_REGEN_HOURS - 1
 
     warp_hours(direct_vm, SCAR_HOURS + HEALTH_REGEN_HOURS)
     pet.pet()
     s = pet.get_state()
-    assert int(s["health"]) == 91                          # the fourth pays out
+    assert int(s["health"]) == 53                          # the fourth pays out
     assert int(s["health_regen_acc"]) == 0                 # and the bank starts over
 
 
@@ -533,7 +904,7 @@ def test_health_regen_remainder_survives_an_action(direct_vm, direct_deploy):
     warp_hours(direct_vm, SCAR_HOURS + 4)
     pet.pet()
     s = pet.get_state()
-    assert int(s["health"]) == 91
+    assert int(s["health"]) == 53
     assert int(s["health_regen_acc"]) == 0
 
 
@@ -550,10 +921,10 @@ def test_starving_clears_health_regen_acc(direct_vm, direct_deploy):
     warp_hours(direct_vm, SCAR_HOURS + 50)
     pet.pet()
     s = pet.get_state()
-    # 11 band hours (+2 HP, health 92), 30 in the middle, then hours 42..50 start
+    # 11 band hours (+2 HP, health 54), 30 in the middle, then hours 42..50 start
     # under STARVE_SATIETY: nine of them, one point each.
     assert int(s["satiety"]) == 0
-    assert int(s["health"]) == 83
+    assert int(s["health"]) == 45
     assert int(s["health_regen_acc"]) == 0
     assert s["alive"] is True
 
@@ -564,24 +935,24 @@ def test_a_substantial_feed_heals_one_hp_only_when_well_fed(direct_vm, direct_de
     0.10 GEN into a starving pet is a snack, not care — the point of the scar is
     that it cannot be bought off in one transaction from the bottom.
     """
-    pet = _scarred(direct_vm, direct_deploy)                        # health 89, satiety 0
+    pet = _scarred(direct_vm, direct_deploy)                        # health 51, satiety 0
 
     _feed(pet, direct_vm, HEALTH_FEED_GAIN_MIN * WEI_PER_SATIETY)   # 0 -> 10
     s = pet.get_state()
     assert int(s["satiety"]) == 10
-    assert int(s["health"]) == 89          # big enough meal, nowhere near the band
+    assert int(s["health"]) == 51          # big enough meal, nowhere near the band
 
     _feed(pet, direct_vm, 50 * WEI_PER_SATIETY)                     # 10 -> 60
     _feed(pet, direct_vm, 15 * WEI_PER_SATIETY)                     # 60 -> 75, still short
-    assert int(pet.get_state()["health"]) == 89
+    assert int(pet.get_state()["health"]) == 51
 
     _feed(pet, direct_vm, HEALTH_FEED_GAIN_MIN * WEI_PER_SATIETY)   # 75 -> 85: both hold
-    assert int(pet.get_state()["health"]) == 90
+    assert int(pet.get_state()["health"]) == 52
 
     _feed(pet, direct_vm, 5 * WEI_PER_SATIETY)                      # well fed, but a snack
     s = pet.get_state()
     assert int(s["satiety"]) == 90
-    assert int(s["health"]) == 90
+    assert int(s["health"]) == 52
 
 
 def test_a_cap_feed_still_heals_only_one_hp(direct_vm, direct_deploy):
@@ -591,18 +962,18 @@ def test_a_cap_feed_still_heals_only_one_hp(direct_vm, direct_deploy):
     _feed(pet, direct_vm, 500 * WEI_PER_SATIETY)   # gain capped at FEED_CAP -> satiety 100
     s = pet.get_state()
     assert int(s["satiety"]) == 100
-    assert int(s["health"]) == 90                  # +1, not +50
+    assert int(s["health"]) == 52                  # +1, not +50
 
 
 def test_freezing_still_chips_health_on_check(direct_vm, direct_deploy):
     """_apply_world's cold chip survives the rewrite, and is charged exactly once."""
-    pet = _scarred(direct_vm, direct_deploy)       # health 89, cursor on the hour
+    pet = _scarred(direct_vm, direct_deploy)       # health 51, cursor on the hour
     direct_vm.clear_mocks()                        # mocks stack; start clean
     _mock_weather(direct_vm, code=3, temp=-5.0)    # cloudy, so only the cold moves anything
     direct_vm.mock_llm(r".*", json.dumps({"quote": "Cold.", "mood_delta": 0}))
     pet.check()
     s = pet.get_state()
-    assert int(s["health"]) == 88
+    assert int(s["health"]) == 50
     assert int(s["health_regen_acc"]) == 0         # no hour was billed, so nothing was banked
 
 
@@ -628,66 +999,52 @@ def test_decay_over_DECAY_BILL_CAP_kills(direct_vm, direct_deploy):
     assert "went quiet from neglect" in last
 
 
-class _FakeClock:
-    """The two storage reads `_age_days_at_billed_hour` makes, and nothing else.
-
-    The helper is a method because PR3 will call it from inside _decay, but the
-    only state it touches is birth_ts and the elapsed-seconds reading — so it can
-    be exercised against a stand-in without a deployed pet, which is the only way
-    to reach a private method from out here.
-    """
-
-    birth_ts = 0
-
-    def __init__(self, elapsed):
-        self._value = elapsed
-
-    def _elapsed(self, since_ts):
-        return self._value
-
-
 def test_age_at_a_billed_hour_walks_back_past_the_unbilled_leftover(direct_deploy):
     """The age used for an hour is the age at the START of that hour.
 
-    Nothing calls this yet — PR3's per-stage hunger rates are its first caller —
-    but the arithmetic is the kind that is invisible when wrong: the `leftover`
+    The arithmetic is the kind that is invisible when wrong: the `leftover`
     seconds have already passed and have NOT been billed, so they sit between the
     last billed hour and now. Forget to subtract them and every hour's age is
     overstated by up to an hour, which at a stage boundary is not a rounding
-    error but the wrong rate table for the whole bill.
+    error but the wrong rate table for the rest of the bill.
+
+    It became a plain module function in PR 3 rather than a method, and taking
+    `age_secs` as an argument IS the change: _decay calls it once per billed
+    hour, so reading birth_ts and time_scale out of storage inside it would put
+    up to 2 x DECAY_BILL_CAP storage reads in the hour loop that correction C2
+    exists to keep empty.
     """
     mod = _contract_module(direct_deploy)
-    at = mod.AiPet._age_days_at_billed_hour
+    at = mod._age_days_at_billed_hour
 
     # Three days old by a thousand seconds, one hour billed, half an hour unbilled.
-    clock = _FakeClock(3 * 86400 + 1000)
-    assert at(clock, 1, 0, 1800) == 2
-    assert at(clock, 1, 1, 1800) == 2      # still 2 — dropping the leftover would say 3
+    age = 3 * 86400 + 1000
+    assert at(age, 1, 0, 1800) == 2
+    assert at(age, 1, 1, 1800) == 2        # still 2 — dropping the leftover would say 3
 
     # A birthday that lands mid-bill: five hours billed, the boundary between the
     # fifth and the last.
-    clock = _FakeClock(3 * 86400 + 1000)
-    assert at(clock, 5, 0, 1000) == 2
-    assert at(clock, 5, 4, 1000) == 2
-    assert at(clock, 5, 5, 1000) == 3
+    assert at(age, 5, 0, 1000) == 2
+    assert at(age, 5, 4, 1000) == 2
+    assert at(age, 5, 5, 1000) == 3
 
     # And it floors at 0 rather than going negative on a pet younger than the bill.
-    assert at(_FakeClock(3600), 10, 0, 0) == 0
+    assert at(3600, 10, 0, 0) == 0
 
 
 def _slowest_rates(mod):
     """The kindest hunger and starve rates the constants in force allow.
 
-    PR3 gives every life stage its own row in STAGE_RULES; taking the minimum
-    across the table keeps the derivation below honest without teaching it more
-    about the table than "hunger is [1], starve is [2]". If that shape ever
-    changes this raises, which is the point — a silent fallback to the flat rates
-    would measure the wrong thing and still pass.
+    PR 3 gives every life stage its own hunger and starve rate; taking the
+    minimum across both tables keeps the derivation below honest without teaching
+    it anything about which stage is which. A pet cannot actually hold the
+    kindest of both for 200 hours — an egg is an egg for one day — so this is
+    strictly pessimistic, which is what a safety margin wants to be.
     """
-    rules = getattr(mod, "STAGE_RULES", None)
-    if rules:
-        return (min(int(r[1]) for r in rules.values()),
-                min(int(r[2]) for r in rules.values()))
+    hunger = getattr(mod, "STAGE_SATIETY_PER_HOUR", None)
+    starve = getattr(mod, "STAGE_STARVE_PER_HOUR", None)
+    if hunger and starve:
+        return min(int(v) for v in hunger.values()), min(int(v) for v in starve.values())
     return int(mod.SATIETY_PER_HOUR), int(mod.STARVE_HEALTH_PER_HOUR)
 
 
@@ -724,8 +1081,15 @@ def test_worst_case_death_clock_is_under_DECAY_BILL_CAP(direct_deploy):
     sound while every pet dies before reaching it. Tune the rates kindly enough —
     slower hunger, faster regen — and the cap silently becomes the rule that
     kills pets instead, at a hard 200 hours, with no warning anywhere. Derived
-    from the constants rather than pinned to today's 126 so that a future rate
-    change fails HERE, in a test that explains itself, rather than in a demo.
+    from the constants rather than pinned to a number so that a future rate change
+    fails HERE, in a test that explains itself, rather than in a demo.
+
+    MARGIN WATCH. The stage tables cost most of the slack: taking the kindest
+    hunger AND the kindest starve rate across the whole table (both 1, the egg's)
+    the worst start now survives 181 billed hours against a cap of 200, where the
+    flat rates gave 141. No real pet can hold both — an egg is an egg for one day
+    — so the bound is deliberately pessimistic, but 19 hours is what is left. The
+    next kindness to a rate should raise DECAY_BILL_CAP in the same commit.
     """
     mod = _contract_module(direct_deploy)
     hunger, starve = _slowest_rates(mod)
@@ -764,7 +1128,8 @@ def test_idle_minutes_are_carried_over_not_forgiven(direct_vm, direct_deploy):
 
     warp_hours(direct_vm, 1.25)      # 30 min later: the hour is now complete
     pet.pet()
-    assert int(pet.get_state()["satiety"]) == 70 - SATIETY_PER_HOUR
+    # one whole hour, billed at the EGG's hunger — the pet is a day from hatching
+    assert int(pet.get_state()["satiety"]) == 70 - EGG_SATIETY_PER_HOUR
 
 
 def test_acting_every_59_minutes_does_not_make_a_pet_immortal(
@@ -784,7 +1149,8 @@ def test_acting_every_59_minutes_does_not_make_a_pet_immortal(
         warp_hours(direct_vm, i * 59 / 60.0)
         pet.pet()
     s = pet.get_state()
-    assert int(s["satiety"]) == 70 - 11 * SATIETY_PER_HOUR   # 11 whole hours billed
+    # 11 whole hours billed, all of them egg hours (the pet is 11 h old)
+    assert int(s["satiety"]) == 70 - 11 * EGG_SATIETY_PER_HOUR
     assert int(s["satiety"]) < 70
 
 
@@ -796,7 +1162,7 @@ def test_a_scaled_pet_carries_its_remainder_too(direct_vm, direct_deploy):
     for i in range(1, 6):
         warp_seconds(direct_vm, i)               # one virtual hour per step
         pet.pet()
-    assert int(pet.get_state()["satiety"]) == 70 - 5 * SATIETY_PER_HOUR
+    assert int(pet.get_state()["satiety"]) == 70 - 5 * EGG_SATIETY_PER_HOUR
 
 
 # ------------------------------ revive --------------------------------------
@@ -1026,7 +1392,8 @@ def test_scaled_pet_drifts_in_real_seconds(direct_vm, direct_deploy):
     pet = direct_deploy(CONTRACT, *CTOR, DEMO_SCALE)
     warp_seconds(direct_vm, 3)          # 3 real s == 3 virtual h
     pet.pet()
-    assert int(pet.get_state()["satiety"]) == 70 - 3 * 2   # SATIETY_PER_HOUR
+    # still an egg — three virtual hours at the egg's hunger, not an adult's
+    assert int(pet.get_state()["satiety"]) == 70 - 3 * EGG_SATIETY_PER_HOUR
 
 
 def test_unscaled_pet_ignores_a_few_seconds(direct_vm, direct_deploy):
@@ -1171,15 +1538,16 @@ def test_bare_transfer_does_not_charge_idle_time_twice(direct_vm, direct_deploy)
     warp_hours(direct_vm, 0)
     pet = direct_deploy(CONTRACT, *CTOR)
 
-    warp_hours(direct_vm, 10)                       # 10 idle h: satiety 70 -> 50
-    _send_bare(pet, direct_vm, GEN // 10)           # then +10 => 60
-    assert int(pet.get_state()["satiety"]) == 60
+    warp_hours(direct_vm, 10)                       # 10 idle egg h: satiety 70 -> 60
+    _send_bare(pet, direct_vm, GEN // 10)           # then +10 => 70
+    assert int(pet.get_state()["satiety"]) == 70
 
     direct_vm.mock_llm(r".*", json.dumps({"quote": "still here", "mood_delta": 0}))
     warp_hours(direct_vm, 20)                       # 10 MORE idle hours, not 20
     pet.pet()
-    # 60 - 10h*2 = 40. If the transfer had not stamped the clock it would be 20.
-    assert int(pet.get_state()["satiety"]) == 40
+    # 70 - 10 egg hours = 60. If the transfer had not stamped the clock, all 20
+    # hours would be billed again from 70 and this would read 50.
+    assert int(pet.get_state()["satiety"]) == 60
 
 
 def test_zero_value_transfer_still_advances_the_clock(direct_vm, direct_deploy):
@@ -1189,13 +1557,15 @@ def test_zero_value_transfer_still_advances_the_clock(direct_vm, direct_deploy):
 
     warp_hours(direct_vm, 10)
     _send_bare(pet, direct_vm, 0)
-    assert int(pet.get_state()["satiety"]) == 50    # decay applied, nothing fed
+    assert int(pet.get_state()["satiety"]) == 60    # decay applied, nothing fed
     assert int(pet.get_state()["total_fed_wei"]) == 0
 
     direct_vm.mock_llm(r".*", json.dumps({"quote": "hm", "mood_delta": 0}))
     warp_hours(direct_vm, 20)
     pet.pet()
-    assert int(pet.get_state()["satiety"]) == 30    # 50 - 10h*2, not 50 - 20h*2
+    # 60 - 10 egg hours, not 60 - 20: the stamped clock is what stops the first
+    # ten hours being charged a second time.
+    assert int(pet.get_state()["satiety"]) == 50
 
 
 def test_bare_transfer_to_a_dead_pet_is_refused(direct_vm, direct_deploy):
@@ -1380,9 +1750,8 @@ def _greet(pet, direct_vm, guest_addr, quote="Hello from next door."):
 
 
 def test_visit_reads_the_host_and_delivers_a_greeting(direct_vm, direct_deploy, direct_owner, direct_bob):
-    warp_hours(direct_vm, 0)
     direct_vm.sender = direct_owner
-    pet = direct_deploy(CONTRACT, *CTOR)
+    pet = _kitten(direct_vm, direct_deploy)     # an egg is too young to visit
     nb = Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
     direct_vm.mock_llm(r".*", json.dumps({"quote": "Kuzya! Come sit in the sun.", "mood_delta": 0}))
 
@@ -1409,9 +1778,8 @@ def test_a_neighbour_is_read_from_finalized_state(direct_vm, direct_deploy, dire
     default can differ between validators reading seconds apart. 1 is
     StorageType.LATEST_FINAL, 2 is LATEST_NON_FINAL.
     """
-    warp_hours(direct_vm, 0)
     direct_vm.sender = direct_owner
-    pet = direct_deploy(CONTRACT, *CTOR)
+    pet = _kitten(direct_vm, direct_deploy)     # an egg is too young to visit
     nb = Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
     direct_vm.mock_llm(r".*", json.dumps({"quote": "Hello.", "mood_delta": 0}))
 
@@ -1426,9 +1794,8 @@ def test_the_host_is_described_to_the_llm(direct_vm, direct_deploy, direct_owner
     Two stacked mocks, first match wins: if the host's name never reaches the
     prompt the second one answers and the assertion fails.
     """
-    warp_hours(direct_vm, 0)
     direct_vm.sender = direct_owner
-    pet = direct_deploy(CONTRACT, *CTOR)
+    pet = _kitten(direct_vm, direct_deploy)     # an egg is too young to visit
     nb = Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
     direct_vm.mock_llm(r"visiting another pet called Kuzya \(life stage: adult\)",
                        json.dumps({"quote": "SAW THE HOST", "mood_delta": 0}))
@@ -1438,17 +1805,21 @@ def test_the_host_is_described_to_the_llm(direct_vm, direct_deploy, direct_owner
 
 
 def test_visiting_lifts_the_mood_and_costs_energy(direct_vm, direct_deploy, direct_owner, direct_bob):
-    warp_hours(direct_vm, 0)
+    """A kitten, because an egg cannot travel — see _kitten for why revive().
+
+    No time passes between the revive and the visit, so the only things that move
+    the meters here are VISIT_MOOD_GUEST and VISIT_SATIETY_COST.
+    """
     direct_vm.sender = direct_owner
-    pet = direct_deploy(CONTRACT, *CTOR)
+    pet = _kitten(direct_vm, direct_deploy)
     nb = Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
     direct_vm.mock_llm(r".*", json.dumps({"quote": "Walked over.", "mood_delta": 0}))
 
     pet.visit(nb.address_hex)
 
     s = pet.get_state()
-    assert int(s["mood"]) == 73                     # 70 + VISIT_MOOD_GUEST
-    assert int(s["satiety"]) == 67                  # 70 - VISIT_SATIETY_COST
+    assert int(s["mood"]) == REVIVE_MOOD + 3        # + VISIT_MOOD_GUEST
+    assert int(s["satiety"]) == REVIVE_SATIETY - 3  # - VISIT_SATIETY_COST
     assert pet.get_social()["visits_sent"] == 1
 
 
@@ -1463,9 +1834,8 @@ def test_a_pet_cannot_visit_itself(direct_vm, direct_deploy, direct_owner):
 def test_visiting_something_that_is_not_a_pet_is_refused(direct_vm, direct_deploy, direct_owner, direct_bob, direct_charlie):
     """The view call IS the authentication — an address that cannot answer
     get_state() like a pet gets no visit, and no message is sent to it."""
-    warp_hours(direct_vm, 0)
     direct_vm.sender = direct_owner
-    pet = direct_deploy(CONTRACT, *CTOR)
+    pet = _kitten(direct_vm, direct_deploy)     # an egg is too young to visit
     nb = Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
 
     with direct_vm.expect_revert("does not answer like an AiPet"):
@@ -1475,9 +1845,8 @@ def test_visiting_something_that_is_not_a_pet_is_refused(direct_vm, direct_deplo
 
 def test_a_host_answering_with_junk_is_refused(direct_vm, direct_deploy, direct_owner, direct_bob):
     """A contract that answers get_state() with the wrong shape is not a pet."""
-    warp_hours(direct_vm, 0)
     direct_vm.sender = direct_owner
-    pet = direct_deploy(CONTRACT, *CTOR)
+    pet = _kitten(direct_vm, direct_deploy)     # an egg is too young to visit
     nb = Neighbour(direct_vm, direct_bob, **NEIGHBOUR_CTOR)
     nb.answers["get_state"] = {"hello": "i am totally a pet"}
 
@@ -1584,8 +1953,9 @@ def test_company_is_not_food(direct_vm, direct_deploy, direct_bob):
     direct_vm.mock_llm(r".*", json.dumps({"quote": "I am starving.", "mood_delta": 0}))
     pet.pet()
 
-    # all 20 idle hours billed: 70 - 20*2. A stamped clock would leave 50.
-    assert int(pet.get_state()["satiety"]) == 30
+    # all 20 idle hours billed, at the egg's hunger: 70 - 20*1. Had the greeting
+    # stamped the clock, only the last ten would be billed and this would be 60.
+    assert int(pet.get_state()["satiety"]) == 50
 
 
 def test_a_guests_words_are_never_the_pets_own_voice(direct_vm, direct_deploy, direct_bob):
@@ -1614,9 +1984,10 @@ def test_the_pet_answers_the_greeting_the_next_time_it_speaks(direct_vm, direct_
     direct_vm.mock_llm(r".*", json.dumps({"quote": "HEARD NOTHING", "mood_delta": 0}))
 
     assert pet.pet() == "HEARD KUZYA"
-    # answered once, then forgotten — it must not colour every later line
+    # answered once, then forgotten — it must not colour every later line.
+    # A second pet(), not play(): this one is a day-zero egg and eggs cannot play.
     assert pet.get_social()["pending_name"] == ""
-    assert pet.play() == "HEARD NOTHING"
+    assert pet.pet() == "HEARD NOTHING"
 
 
 def test_the_guest_is_named_where_the_model_will_act_on_it(direct_vm, direct_deploy, direct_bob):
@@ -1647,10 +2018,11 @@ def test_a_pet_out_visiting_is_not_told_to_answer_someone_at_home(direct_vm, dir
     Clearing here would mean a friend who called round is forgotten for no
     better reason than that their host happened to be out.
     """
-    warp_hours(direct_vm, 0)
     direct_vm.sender = direct_owner
-    pet = direct_deploy(CONTRACT, *CTOR)
+    pet = _kitten(direct_vm, direct_deploy)     # an egg is too young to visit
     nb = Neighbour(direct_vm, direct_charlie, name="Mochi", stage="kitten")
+    # AFTER the revive: revive() speaks, and any line the pet speaks consumes the
+    # guest waiting at home.
     _greet(pet, direct_vm, direct_charlie, "Knock knock.")
 
     direct_vm.mock_llm(r"Mochi came by", json.dumps({"quote": "WRONG PET", "mood_delta": 0}))

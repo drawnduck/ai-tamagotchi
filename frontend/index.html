@@ -1917,7 +1917,19 @@ const MENU = [
   { key: "talk",  icon: "talk",  label: "talk",  view: "talk" },
   { key: "char",  icon: "heart", label: "self",  view: "char" },
 ];
-function menuItems() { return MENU.filter(m => !m.owner || isOwner); }
+// Life stages gate two of these on-chain (STAGE_MIN_PLAY / STAGE_MIN_VISIT), so
+// they are hidden rather than offered and then refused. Same reasoning as the
+// owner filter above: a revert is a poor way to learn a button was never for you.
+// The stage falls back to "egg" when state has not loaded, which fails closed.
+function menuItems() {
+  const stage = String(pet?.stage || "egg");
+  return MENU.filter(m => {
+    if (m.owner && !isOwner) return false;
+    if (m.key === "play" && stage === "egg") return false;
+    if (m.key === "visit" && (stage === "egg" || stage === "hatchling")) return false;
+    return true;
+  });
+}
 
 const ui = {
   cursor: 0,          // index into menuItems()
