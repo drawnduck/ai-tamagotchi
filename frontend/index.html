@@ -932,9 +932,7 @@
 
   .game-page { min-height: calc(100svh - 132px); display: grid; place-items: center; }
   .game-layout {
-    width: min(980px, 100%); display: grid;
-    grid-template-columns: minmax(340px, 520px) minmax(220px, 270px);
-    justify-content: center; align-items: center; gap: clamp(28px, 6vw, 76px);
+    width: min(520px, 100%);
   }
   .game-device-column { min-width: 0; }
   .game-device-column .toybox { position: static; width: 100%; max-width: 520px; margin: 0 auto; }
@@ -945,38 +943,6 @@
     padding: 0 !important; margin: -1px !important; overflow: hidden !important;
     clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important;
   }
-
-  .pet-hud { align-self: center; width: 100%; }
-  .pet-kicker {
-    margin: 0 0 10px; font-family: var(--mono); font-size: 8px; font-weight: 700;
-    letter-spacing: .24em; text-transform: uppercase; color: var(--ink-faint);
-  }
-  .pet-identity { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 28px; }
-  .pet-identity strong { font-family: var(--serif); font-size: clamp(27px, 4vw, 42px); font-weight: 400; line-height: 1; }
-  .pet-identity span {
-    font-family: var(--mono); font-size: 8px; font-weight: 700; letter-spacing: .14em;
-    text-transform: uppercase; color: var(--ink-faint);
-  }
-  .mood-stack { display: grid; gap: 17px; }
-  .mood-row__top {
-    display: flex; justify-content: space-between; margin-bottom: 7px;
-    font-family: var(--mono); font-size: 8px; font-weight: 700; letter-spacing: .16em;
-    text-transform: uppercase; color: var(--ink-dim);
-  }
-  .mood-track {
-    height: 8px; padding: 2px; border-radius: 999px; background: rgba(36,38,40,.2);
-    box-shadow: inset 0 1px 2px rgba(16,18,20,.34), 0 1px 0 rgba(255,255,255,.55);
-  }
-  .mood-fill {
-    display: block; width: 0%; height: 100%; border-radius: inherit;
-    background: linear-gradient(90deg, #343a22, #809743 63%, #b9ce65);
-    box-shadow: 0 0 8px rgba(139,174,75,.38); transition: width .7s cubic-bezier(.2,.8,.2,1);
-  }
-  .pet-hint {
-    margin: 28px 0 0; padding-top: 16px; border-top: 1px solid rgba(28,29,31,.18);
-    font-family: var(--serif); font-size: 13px; line-height: 1.45; color: var(--ink-faint);
-  }
-  .pet-hint b { color: var(--ink-dim); font-weight: 400; }
 
   #status.console {
     position: fixed; z-index: 75; left: 50%; bottom: 18px; width: max-content;
@@ -1080,12 +1046,6 @@
 
   @media (max-width: 820px) {
     .game-page { align-items: start; }
-    .game-layout { grid-template-columns: minmax(0, 520px); gap: 18px; }
-    .pet-hud { width: min(430px, 100%); margin: 0 auto; }
-    .pet-identity { margin-bottom: 20px; }
-    .mood-stack { grid-template-columns: repeat(3, 1fr); gap: 10px; }
-    .mood-row__top { gap: 5px; font-size: 7px; letter-spacing: .08em; }
-    .pet-hint { display: none; }
     .page-grid.two, .page-intro { grid-template-columns: 1fr; }
     .page-intro { gap: 16px; }
   }
@@ -1097,12 +1057,7 @@
     .menu-trigger__name { display: none; }
     .wallet-mini { max-width: 52vw; padding: 0 12px 0 25px; font-size: 7.5px; }
     .wallet-mini::before { left: 11px; }
-    .game-layout { grid-template-columns: minmax(0, 430px); }
     .game-device-column .devicefoot { font-size: 8px; gap: 4px 9px; }
-    .pet-hud { padding: 0 12px; }
-    .pet-identity strong { font-size: 27px; }
-    .mood-stack { gap: 7px; }
-    .mood-row__top span:first-child { overflow: hidden; text-overflow: ellipsis; }
     .content-page { padding-top: 24px; }
     .page-intro { padding: 0 8px; }
     .page-intro h2 { font-size: 46px; }
@@ -1115,7 +1070,6 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .app-page, .menu-popover { animation: none; }
-    .mood-fill { transition: none; }
   }
 </style>
 </head>
@@ -1237,29 +1191,6 @@
           </div>
         </div>
 
-        <aside class="pet-hud" aria-label="Pet condition">
-          <p class="pet-kicker">Live on-chain state</p>
-          <div class="pet-identity">
-            <strong id="petDisplayName">Waiting…</strong>
-            <span id="petStage">No pet</span>
-          </div>
-          <div class="mood-stack">
-            <div class="mood-row">
-              <div class="mood-row__top"><span>Fullness</span><span id="satietyValue">—</span></div>
-              <div class="mood-track"><span class="mood-fill" id="satietyBar"></span></div>
-            </div>
-            <div class="mood-row">
-              <div class="mood-row__top"><span>Mood</span><span id="moodValue">—</span></div>
-              <div class="mood-track"><span class="mood-fill" id="moodBar"></span></div>
-            </div>
-            <div class="mood-row">
-              <div class="mood-row__top"><span>Health</span><span id="healthValue">—</span></div>
-              <div class="mood-track"><span class="mood-fill" id="healthBar"></span></div>
-            </div>
-          </div>
-          <p class="pet-hint"><b>A</b> chooses an action, <b>B</b> opens or confirms it,
-            and <b>C</b> returns home. The keyboard works the same way.</p>
-        </aside>
       </div>
     </section>
 
@@ -2013,25 +1944,7 @@ function spriteFor() {
   return "adult";
 }
 
-function setHudMeter(name, rawValue) {
-  const hasValue = rawValue !== null && rawValue !== undefined && rawValue !== "";
-  const value = hasValue ? Math.max(0, Math.min(100, Number(rawValue) || 0)) : 0;
-  $(`${name}Bar`).style.width = `${value}%`;
-  $(`${name}Value`).textContent = hasValue ? `${Math.round(value)}%` : "—";
-}
-
-function renderPetHud() {
-  $("petDisplayName").textContent = pet?.name || (address ? "Reading…" : "No pet yet");
-  $("petStage").textContent = pet
-    ? `${String(pet.stage || "pet")} · ${Number(pet.age_days || 0)}d`
-    : "No pet";
-  setHudMeter("satiety", pet?.satiety);
-  setHudMeter("mood", pet?.mood);
-  setHudMeter("health", pet?.health);
-}
-
 function render() {
-  renderPetHud();
   deviceVisual.dataset.view = ui.view;
   deviceVisual.dataset.alive = String(alive);
   ctx.clearRect(0, 0, W, H);
