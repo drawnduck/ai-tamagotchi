@@ -9,6 +9,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gloock&family=Rammetto+One&family=Space+Mono:wght@400;700&display=swap" />
 <link rel="preload" as="image" href="assets/aipet-device-render-v1.png" fetchpriority="high" />
+<link rel="preload" as="image" href="assets/rules-manual-closed-v1.png" />
+<link rel="preload" as="image" href="assets/rules-manual-open-v3.png" />
 <style>
   /* ═══════════════════════════════════════════════════════════════════════
      LIQUID CHROME
@@ -911,6 +913,50 @@
   .game-device-column .toybox { position: static; width: 100%; max-width: 520px; margin: 0 auto; }
   .game-device-column .device { width: 100%; }
   .game-device-column .devicefoot { margin-top: 13px; }
+
+  /* A real object, not another chrome pill. It sits like a field manual placed
+     at the lower-right edge, clear of the toy and the bottom status readout. */
+  .rules-launch {
+    position: fixed; z-index: 65; right: clamp(18px, 3vw, 40px);
+    bottom: clamp(72px, 9vh, 96px); width: clamp(128px, 11vw, 154px);
+    aspect-ratio: 1; padding: 0; border: 0;
+    color: inherit; background: transparent; cursor: pointer;
+    filter: drop-shadow(0 16px 17px rgba(22,20,19,.24));
+    transform: rotate(-3deg); transform-origin: 50% 70%;
+    transition: transform .25s cubic-bezier(.2,.8,.2,1), filter .25s ease;
+  }
+  .rules-launch:hover {
+    transform: translateY(-6px) rotate(-1deg) scale(1.035);
+    filter: drop-shadow(0 21px 21px rgba(22,20,19,.3));
+  }
+  .rules-launch:active { transform: translateY(1px) rotate(-2deg) scale(.985); }
+  .rules-launch:focus-visible { outline: none; }
+  .rules-launch:focus-visible::after {
+    content: ""; position: absolute; inset: 8px; border: 2px solid #7baa45;
+    border-radius: 22px; box-shadow: 0 0 0 4px rgba(123,170,69,.2);
+  }
+  .rules-launch__art, .rules-launch__image {
+    position: absolute; inset: 0; display: block; width: 100%; height: 100%;
+  }
+  .rules-launch__image { object-fit: contain; pointer-events: none; user-select: none; }
+  .rules-launch__image--closed {
+    opacity: 1; transform: scale(.94) rotate(0deg);
+    transition: opacity .16s ease, transform .34s cubic-bezier(.2,.85,.2,1);
+  }
+  .rules-launch__image--open {
+    opacity: 0; transform: scale(.62) rotate(2deg);
+    transition: opacity .16s ease, transform .38s cubic-bezier(.16,.85,.2,1);
+  }
+  .rules-launch[aria-expanded="true"] {
+    transform: translateY(-3px) rotate(0deg) scale(1.08);
+    filter: drop-shadow(0 22px 24px rgba(22,20,19,.32));
+  }
+  .rules-launch[aria-expanded="true"] .rules-launch__image--closed {
+    opacity: 0; transform: scale(.72) rotate(-4deg);
+  }
+  .rules-launch[aria-expanded="true"] .rules-launch__image--open {
+    opacity: 1; transform: scale(1.13) rotate(0deg);
+  }
   .saidout {
     position: absolute !important; width: 1px !important; height: 1px !important;
     padding: 0 !important; margin: -1px !important; overflow: hidden !important;
@@ -972,6 +1018,7 @@
   @media (max-width: 940px) {
     /* off the device's flank, tucked above the status console */
     .pet-rail { right: 8px; top: auto; bottom: 82px; transform: none; width: 108px; max-height: 38vh; }
+    .app-shell:has(#petRail:not([hidden])) .rules-launch { right: 126px; }
   }
 
   /* ── the world rail: what the city is doing to the mood, at a glance ──
@@ -1089,6 +1136,98 @@
   }
   .utility-kv b { font-weight: 700; color: var(--ink-dim); }
 
+  /* ── field manual: readable rules inside a piece of the same hardware ── */
+  .rules-dialog {
+    inset: 0; width: min(680px, calc(100vw - 28px)); max-width: none;
+    max-height: calc(100svh - 28px); margin: auto; padding: 5px;
+    border: 1px solid rgba(25,27,29,.72); border-radius: 25px; overflow: hidden;
+    color: var(--ink); background:
+      linear-gradient(145deg, #59616a 0%, #f3f5f6 8%, #9aa1a8 17%, #f8f9fa 27%,
+        #747b83 38%, #eef1f3 51%, #8a9299 63%, #f5f7f8 76%, #646b73 89%, #d8dde1 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 -2px 4px rgba(23,25,27,.38),
+      0 34px 90px rgba(14,15,14,.42);
+  }
+  .rules-dialog[open] { animation: rules-dialog-arrive .32s cubic-bezier(.16,.82,.2,1) both; }
+  .rules-dialog::backdrop {
+    background: rgba(29,29,27,.32); backdrop-filter: blur(7px) saturate(.8);
+    animation: rules-backdrop-arrive .22s ease both;
+  }
+  @keyframes rules-dialog-arrive {
+    from { opacity: 0; transform: translateY(14px) scale(.96); }
+  }
+  @keyframes rules-backdrop-arrive { from { opacity: 0; } }
+  .rules-manual {
+    position: relative; max-height: calc(100svh - 40px); overflow-y: auto;
+    padding: 34px clamp(24px, 5vw, 48px) 30px; border-radius: 19px;
+    border: 1px solid rgba(64,44,35,.42);
+    background:
+      linear-gradient(90deg, rgba(112,78,54,.05), transparent 10%, transparent 90%, rgba(112,78,54,.05)),
+      radial-gradient(circle at 52% 4%, rgba(255,255,255,.92), transparent 37%),
+      #e4dfd5;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 0 28px rgba(87,62,42,.08);
+    scrollbar-color: rgba(91,102,62,.48) transparent;
+  }
+  .rules-manual::before {
+    content: ""; position: absolute; inset: 0 0 auto; height: 9px;
+    background: linear-gradient(180deg, #76241f, #3f1515);
+    box-shadow: inset 0 1px 0 rgba(255,194,171,.26), 0 2px 5px rgba(48,24,19,.25);
+  }
+  .rules-dialog__head { position: relative; padding: 0 52px 24px 0; }
+  .rules-dialog__eyebrow {
+    margin: 0 0 9px; color: #6d3a28; font-family: var(--mono); font-size: 10px;
+    font-weight: 700; letter-spacing: .2em; text-transform: uppercase;
+  }
+  .rules-dialog h2 {
+    margin: 0; font-family: var(--serif); font-size: clamp(34px, 5.2vw, 48px);
+    font-weight: 400; line-height: .98; letter-spacing: -.025em;
+  }
+  .rules-dialog__intro {
+    margin: 13px 0 0; max-width: 520px; color: #5d5b57;
+    font-size: 15px; line-height: 1.5;
+  }
+  .rules-dialog__close {
+    position: absolute; top: 0; right: 0; display: grid; place-items: center;
+    width: 38px; height: 38px; padding: 0; border: 1px solid rgba(28,29,31,.3);
+    border-radius: 50%; color: #26292c; background: var(--chrome-pill);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.92), 0 4px 9px rgba(20,22,24,.16);
+    cursor: pointer; font-family: var(--mono); font-size: 20px; line-height: 1;
+    transition: transform .16s ease, filter .16s ease;
+  }
+  .rules-dialog__close:hover { transform: rotate(5deg) scale(1.05); filter: brightness(1.06); }
+  .rules-dialog__close:focus-visible { outline: 2px solid #708d43; outline-offset: 3px; }
+  .rules-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid rgba(37,39,41,.18); }
+  .rules-list li {
+    display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 14px;
+    padding: 15px 0 16px; border-bottom: 1px solid rgba(37,39,41,.14);
+  }
+  .rules-list__number {
+    padding-top: 4px; color: #7a3e28; font-family: var(--mono); font-size: 10px;
+    font-weight: 700; letter-spacing: .12em;
+  }
+  .rules-list h3 {
+    margin: 0 0 4px; font-family: var(--serif); font-size: 20px;
+    font-weight: 400; line-height: 1.18;
+  }
+  .rules-list p { margin: 0; color: #575753; font-size: 14px; line-height: 1.55; }
+  .rules-dialog__footer {
+    position: relative; margin: 20px 0 0; padding: 12px 16px 12px 38px;
+    border-radius: 12px; color: #baf386; background: #11130d;
+    box-shadow: inset 0 0 0 1px rgba(186,243,134,.12), inset 0 2px 8px rgba(0,0,0,.6);
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.5; letter-spacing: .025em;
+  }
+  .rules-dialog__footer::before {
+    content: ""; position: absolute; left: 17px; top: 50%; width: 8px; height: 8px;
+    border-radius: 50%; transform: translateY(-50%); background: #8ee73f;
+    box-shadow: 0 0 8px rgba(142,231,63,.85);
+  }
+
+  @media (min-width: 720px) {
+    .rules-dialog { width: min(760px, calc(100vw - 28px)); }
+    .rules-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
+    .rules-list li { grid-template-columns: 31px minmax(0, 1fr); gap: 10px; }
+    .rules-list li:nth-child(5) { grid-column: 1 / -1; }
+  }
+
   #status.console {
     position: fixed; z-index: 75; left: 50%; bottom: 18px; width: max-content;
     max-width: min(560px, calc(100vw - 32px)); transform: translateX(-50%);
@@ -1184,8 +1323,13 @@
 
   @media (max-width: 820px) {
     .game-page { align-items: start; }
+    .game-layout { display: block; position: relative; width: min(520px, 100%); }
     .page-grid.two, .page-intro { grid-template-columns: 1fr; }
     .page-intro { gap: 16px; }
+  }
+  @media (max-width: 700px) {
+    .rules-launch { right: 10px; bottom: 84px; width: 86px; }
+    .app-shell:has(#petRail:not([hidden])) .rules-launch { right: 124px; }
   }
   @media (max-width: 560px) {
     .topbar { padding: 12px; }
@@ -1205,9 +1349,22 @@
     }
     #directory.community-directory .acts { grid-column: 2 / -1; }
     .pet-feeders-popover { left: 0; right: auto; width: 100%; }
+    .rules-launch { right: 7px; bottom: 84px; width: 78px; }
+    .app-shell:has(#petRail:not([hidden])) .rules-launch { right: 122px; }
+    .rules-dialog { width: calc(100vw - 16px); max-height: calc(100svh - 16px); }
+    .rules-manual { max-height: calc(100svh - 28px); padding: 29px 18px 20px; }
+    .rules-dialog__head { padding-right: 45px; }
+    .rules-dialog h2 { font-size: 32px; }
+    .rules-dialog__intro { font-size: 14px; }
+    .rules-list li { grid-template-columns: 30px minmax(0, 1fr); gap: 10px; padding: 13px 0; }
+    .rules-list h3 { font-size: 18px; }
+    .rules-list p { font-size: 13.5px; line-height: 1.5; }
+    .rules-dialog__footer { padding: 11px 12px 11px 34px; font-size: 10.5px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .app-page, .menu-popover, .pet-create-dialog, .pet-create-dialog::backdrop { animation: none; }
+    .app-page, .menu-popover, .pet-create-dialog, .pet-create-dialog::backdrop,
+    .rules-dialog, .rules-dialog::backdrop { animation: none; }
+    .rules-launch, .rules-launch__image { transition: none; }
   }
 </style>
 </head>
@@ -1268,6 +1425,7 @@
           <button type="button" data-route="character"><span class="nav-index">02</span><span>Personality</span></button>
           <button type="button" data-route="community"><span class="nav-index">03</span><span>Community</span></button>
           <button type="button" data-route="journal"><span class="nav-index">04</span><span>Journal</span></button>
+          <button type="button" id="rulesMenu"><span class="nav-index">05</span><span>Rules</span></button>
         </nav>
         <div class="menu-utilities">
           <button class="press" id="refresh" type="button" disabled>Refresh</button>
@@ -1289,6 +1447,16 @@
   <main class="app-main">
     <section class="app-page game-page" data-page="play" aria-label="Play with your pet">
       <div class="game-layout">
+        <button class="rules-launch" id="rulesTrigger" type="button" aria-haspopup="dialog"
+          aria-controls="rulesDialog" aria-expanded="false" aria-label="Open game rules">
+          <span class="rules-launch__art" aria-hidden="true">
+            <img class="rules-launch__image rules-launch__image--closed"
+              src="assets/rules-manual-closed-v1.png" alt="" width="1254" height="1254" draggable="false" />
+            <img class="rules-launch__image rules-launch__image--open"
+              src="assets/rules-manual-open-v3.png" alt="" width="1254" height="1254" draggable="false" />
+          </span>
+        </button>
+
         <div class="game-device-column">
           <div class="toybox">
             <div class="device" id="deviceShell">
@@ -1427,6 +1595,43 @@
       <p class="pet-create-note" id="newPetWeatherNote">The weather in the selected city affects your pet’s mood</p>
       <button class="press pet-create-submit" id="hatch" type="submit" disabled>Create pet</button>
     </form>
+  </dialog>
+
+  <dialog class="rules-dialog" id="rulesDialog" aria-labelledby="rulesTitle"
+    aria-describedby="rulesIntro">
+    <article class="rules-manual">
+      <header class="rules-dialog__head">
+        <p class="rules-dialog__eyebrow">Field manual</p>
+        <h2 id="rulesTitle">How to care for your pet</h2>
+        <p class="rules-dialog__intro" id="rulesIntro">Your pet keeps living while you’re away. Visit it from time to time.</p>
+        <button class="rules-dialog__close" id="rulesClose" type="button" aria-label="Close game rules">×</button>
+      </header>
+
+      <ol class="rules-list">
+        <li>
+          <span class="rules-list__number">01</span>
+          <div><h3>Keep it fed</h3><p>Fullness falls over time. Below 20, your pet starts losing Health. At 80 or more, Health slowly recovers.</p></div>
+        </li>
+        <li>
+          <span class="rules-list__number">02</span>
+          <div><h3>Keep it happy</h3><p>Petting improves Mood a little. Playing gives a bigger boost, but also makes your pet hungry. Play unlocks after your pet hatches.</p></div>
+        </li>
+        <li>
+          <span class="rules-list__number">03</span>
+          <div><h3>Check the world</h3><p>Weather in your pet’s city and changes in the ETH market can affect its Mood. Freezing weather can also lower Health.</p></div>
+        </li>
+        <li>
+          <span class="rules-list__number">04</span>
+          <div><h3>Watch it grow</h3><p>Your pet grows from Egg to Hatchling, Kitten, Adult, and Elder. How you care for it slowly shapes its Personality. Visits unlock at the Kitten stage.</p></div>
+        </li>
+        <li>
+          <span class="rules-list__number">05</span>
+          <div><h3>Care together</h3><p>Anyone can feed a public pet. If a pet runs out of Health, it can be revived for 1 GEN. It may use GEN collected from meals to revive itself.</p></div>
+        </li>
+      </ol>
+
+      <p class="rules-dialog__footer">Viewing is free. Actions require wallet confirmation.</p>
+    </article>
   </dialog>
 
   <dialog class="pet-create-dialog utility-dialog" id="personalityDialog"
@@ -2156,6 +2361,47 @@ newPetDialog.addEventListener("close", () => {
   newPetOpener = null;
 });
 
+const rulesDialog = $("rulesDialog");
+const rulesTrigger = $("rulesTrigger");
+
+function closeRulesDialog() {
+  if (rulesDialog.open) rulesDialog.close();
+}
+
+rulesTrigger.addEventListener("click", () => {
+  if (rulesDialog.open || document.querySelector("dialog[open]")) return;
+  closeAppMenu();
+  rulesDialog.showModal();
+  rulesTrigger.setAttribute("aria-expanded", "true");
+  requestAnimationFrame(() => $("rulesClose").focus());
+});
+$("rulesClose").addEventListener("click", closeRulesDialog);
+rulesDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeRulesDialog();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !rulesDialog.open) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  closeRulesDialog();
+}, true);
+rulesDialog.addEventListener("click", (event) => {
+  if (event.target !== rulesDialog) return;
+  const box = rulesDialog.getBoundingClientRect();
+  const inside = event.clientX >= box.left && event.clientX <= box.right
+    && event.clientY >= box.top && event.clientY <= box.bottom;
+  if (!inside) closeRulesDialog();
+});
+rulesDialog.addEventListener("close", () => {
+  rulesTrigger.setAttribute("aria-expanded", "false");
+  rulesTrigger.focus();
+});
+// The same manual from the menu: 05 Rules opens the book rather than routing
+// to a page — the manual is an object in this world, and it should open the
+// same way wherever it is asked for.
+$("rulesMenu").addEventListener("click", () => { closeAppMenu(); rulesTrigger.click(); });
+
 const personalityDialog = $("personalityDialog");
 const petFundsDialog = $("petFundsDialog");
 const utilityDialogOpeners = new Map();
@@ -2692,6 +2938,7 @@ $("btnB").onclick = pressB;
 $("btnC").onclick = pressC;
 
 document.addEventListener("keydown", (e) => {
+  if (document.querySelector("dialog[open]")) return;
   if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? "")) return;
   if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); pressA(); }
   else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
