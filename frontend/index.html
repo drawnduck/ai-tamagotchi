@@ -2991,7 +2991,8 @@ $("newPetForm").addEventListener("submit", async (event) => {
     const ctorArgs = HATCH_SCALE > 1
       ? [name, HATCH_PERSONA, city, HATCH_SCALE]
       : [name, HATCH_PERSONA, city];
-    const hash = await client.deployContract({ code, args: ctorArgs });
+    const hash = await sendPatiently("deploy", () =>
+      client.deployContract({ code, args: ctorArgs }));
     const tx = await waitForSettled(client, hash, {
       onProgress: (n, ms) => {
         ui.progress = n.toLowerCase().slice(0, CHARS_PER_LINE);
@@ -3496,6 +3497,35 @@ async function walletBalance() {
 
 const fmtGen = (wei) => (Number(wei) / 1e18).toFixed(4);
 
+// The Bradbury RPC meters gas per second across everyone using it, and while
+// it is saturated it refuses new sends with "transaction gas rate limit
+// exceeded: node is at capacity, retry in ~832ms". That is not a failed
+// transaction — nothing was sent — it is the node asking to be called again
+// in a moment. So honour it: parse the delay it suggests, wait it out with a
+// margin, and try again. Bounded, because a node that says "retry" forever is
+// a node that is down, and the player deserves the real error eventually.
+// With a browser wallet a retry re-opens the confirm sheet — unavoidable, the
+// wallet owns the key — so the status line says why it is asking twice.
+const NODE_BUSY_RE = /gas rate limit exceeded|node is at capacity/i;
+const errorText = (e) =>
+  [e?.message, e?.shortMessage, e?.details, e?.cause?.message].filter(Boolean).join(" | ");
+async function sendPatiently(label, send) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await send(); }
+    catch (e) {
+      const msg = errorText(e);
+      if (attempt >= 5 || !NODE_BUSY_RE.test(msg)) throw e;
+      const hinted = Number((msg.match(/retry in ~?(\d+)\s*ms/i) || [])[1]) || 1000;
+      const wait = Math.min(8000, hinted + 400 + attempt * 700);
+      ui.progress = "node busy";
+      setStatus(`${label}: the node is at capacity right now — nothing was sent.\n`
+        + `Retrying in ${(wait / 1000).toFixed(1)}s (attempt ${attempt + 2} of 6)…`
+        + (signerMode === "wallet" ? "\nThe wallet will ask to confirm again." : ""), "warn");
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+}
+
 async function doAction(fn, opts = {}) {
   if (!client) return false;
   const prevView = ui.view;
@@ -3555,7 +3585,8 @@ async function doAction(fn, opts = {}) {
     // call, which also pointed the reload at that contract and briefly showed
     // somebody else's pet in the device.
     const target = opts.target ?? address;
-    const hash = await client.writeContract({ address: target, functionName: fn, args: opts.args ?? [], value });
+    const hash = await sendPatiently(`${fn}()`, () =>
+      client.writeContract({ address: target, functionName: fn, args: opts.args ?? [], value }));
     // Wait for ACCEPTED, not FINALIZED: state is applied at acceptance, while
     // finalization takes far longer. A real check() spends 40-60 s on the web
     // request plus the LLM, and a leader rotation adds another round on top.
