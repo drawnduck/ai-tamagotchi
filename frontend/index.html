@@ -980,9 +980,13 @@
       0 10px 26px rgba(18,20,16,.16);
   }
   .world-rail__label {
-    margin: 0 0 2px; font-family: var(--mono); font-size: 9px; font-weight: 700;
+    margin: 0; font-family: var(--mono); font-size: 9px; font-weight: 700;
     letter-spacing: .2em; text-transform: uppercase; color: var(--ink-dim);
     text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .world-rail__sub {
+    margin: 0 0 2px; font-family: var(--mono); font-size: 8px;
+    letter-spacing: .06em; color: var(--ink-faint); text-align: center; line-height: 1.4;
   }
   .world-chip {
     display: grid; gap: 3px; padding: 9px 10px; border-radius: 11px;
@@ -991,7 +995,7 @@
   }
   .world-chip b {
     font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    line-height: 1.3; /* "thunderstorm" is a real reading — let it wrap, not clip */
   }
   .world-chip span { font-size: 9px; letter-spacing: .045em; line-height: 1.45; color: var(--ink-faint); }
   .world-chip--good b { color: #3d6b1f; }
@@ -3337,14 +3341,23 @@ function renderWorldRail() {
       + `<span>a check in this cold costs health</span></div>`);
   }
   if (!chips.length) {
-    chips.push(`<div class="world-chip"><b>· unread</b>`
-      + `<span>${has ? "the reading faded" : "nothing read yet"} — Check looks outside</span></div>`);
+    // Three different reasons to have nothing to show, each with its own
+    // honest instruction. An old-contract pet feels the weather only in the
+    // moment of a Check and keeps no reading, so telling its owner to press
+    // Check "to fill this in" would be a promise the contract cannot keep.
+    const note = !("condition" in pet)
+      ? "this older pet feels the weather only while a Check runs"
+      : has ? "the last look was over two days ago — press Check to look again"
+            : "press Check: the pet looks at the real sky here and at the eth market";
+    chips.push(`<div class="world-chip"><b>☁ sky unknown</b><span>${note}</span></div>`);
   }
   const drain = hourlyMoodDrain(fresh);
   rail.hidden = false;
   rail.innerHTML = `<p class="world-rail__label">${escapeHtml(pet.city || "the world")}</p>`
+    + `<p class="world-rail__sub">what moves the mood</p>`
     + chips.join("")
-    + `<p class="world-rail__net">${drain ? `mood −${drain}/h idle` : "mood holds steady"}</p>`;
+    + `<p class="world-rail__net">${drain
+        ? `mood −${drain} per hour alone` : "mood holds steady"}</p>`;
 }
 
 function renderPetRail() {
