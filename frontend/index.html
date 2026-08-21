@@ -1426,6 +1426,7 @@
           <button type="button" data-route="community"><span class="nav-index">03</span><span>Community</span></button>
           <button type="button" data-route="journal"><span class="nav-index">04</span><span>Journal</span></button>
           <button type="button" id="rulesMenu"><span class="nav-index">05</span><span>Rules</span></button>
+          <button type="button" data-route="guide"><span class="nav-index">06</span><span>Guide</span></button>
         </nav>
         <div class="menu-utilities">
           <button class="press" id="refresh" type="button" disabled>Refresh</button>
@@ -1552,6 +1553,230 @@
             <h2><svg class="sigil"><use href="#sig" /></svg> Journal <em>newest first</em></h2>
             <div class="hr"></div>
             <ul class="feed" id="history"><li class="empty">nothing yet</li></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- The full rulebook: docs/game-logic.md, translated for the player and
+         kept in the same voice. The field manual (05 Rules) is the capsule
+         version; this page is where every number actually lives. If this page
+         and the contract ever disagree, the contract is right — fix this. -->
+    <section class="app-page content-page" data-page="guide" hidden>
+      <div class="page-intro page-intro--solo personality-intro">
+        <div><p class="page-intro__eyebrow">Every rule of this world, with its numbers</p><h2>Guide</h2></div>
+      </div>
+      <div class="page-grid two">
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> What this is <em>a pet that is a program</em></h2>
+            <div class="hr"></div>
+            <p class="hint">Your pet is not a picture on a website. It is a small program you
+              launch into the GenLayer network, with its own address, its own money box and its
+              own memory. This site is just a window for looking after it — close the tab, turn
+              the computer off, and the pet keeps living: getting hungry, getting bored, growing
+              older.</p>
+            <p class="hint">It speaks for itself. Every line is written by an artificial
+              intelligence at the moment of the action — from its personality, its wellbeing,
+              its age, the weather in its city and whatever just happened. You will never see
+              the same sentence twice.</p>
+            <p class="hint">Because GenLayer can run AI and real web requests inside the chain,
+              with several independent validators checking the result, the pet can honestly
+              look out of the window — and nobody can fake its weather.</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Money &amp; time <em>GEN and real hours</em></h2>
+            <div class="hr"></div>
+            <p class="hint">The game lives on a test network. Its coin, GEN, costs nothing and
+              comes free from the faucet — but inside the game it works like real money: every
+              action is a record written into the network and costs a tiny fee, and food is
+              bought with GEN that stays in the pet's own money box.</p>
+            <p class="hint">By default the pet lives on ordinary clocks: an hour is an hour. A
+              demo pet can be hatched with faster clocks (the <b>?scale=</b> page parameter) —
+              it then lives, and starves, that many times faster. The speed is chosen once at
+              birth and never changes.</p>
+            <p class="hint">Every action is checked by the network together, which takes twenty
+              seconds to a couple of minutes — and “look at the world”, with its real weather
+              request and AI inside, usually a minute or two, under load up to ten. WORKING on
+              the little screen means the network is working, not that anything froze. If the
+              network is saturated and refuses to accept the record, the page retries by itself,
+              up to six times, saying so in the status line.</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Birth <em>a name and a city</em></h2>
+            <div class="hr"></div>
+            <p class="hint">Connect a wallet, take free GEN from the faucet, press the
+              <b>+</b> on the MY PETS shelf, give the pet a name and choose its city. The city
+              is not decoration: the pet will read that city's real weather, and the weather
+              will move its mood.</p>
+            <p class="hint">Hatching deploys the pet's own little program — the one expensive
+              step in the game; everything after it is much cheaper. The wallet that hatched it
+              is recorded as the owner forever. A pet cannot be taken away.</p>
+            <div class="kv"><span>a newborn starts with</span><b>food 70 · mood 70 · health 100</b></div>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> The three meters <em>each 0 to 100</em></h2>
+            <div class="hr"></div>
+            <div class="kv"><span>fullness drains</span><b>2 / hour</b></div>
+            <div class="kv"><span>mood drains</span><b>0–3 / hour, by the weather</b></div>
+            <div class="kv"><span>starving begins below</span><b>fullness 20</b></div>
+            <div class="kv"><span>starving costs</span><b>health −1 / hour (elder −2)</b></div>
+            <p class="hint">Fullness falls even while nobody is here, and only food brings it
+              back. Mood does not kill — it decides what the pet is like to talk to. Health is
+              the life meter: it never falls while the pet is fed, and at zero the pet dies.</p>
+            <p class="hint">Health heals, but far slower than it bleeds — on purpose. Keep
+              fullness at 80 or higher and every 4 well-fed hours return 1 health; a proper meal
+              (10 fullness or more at once) also heals 1, at most once an hour. A pet left
+              completely alone dies in about 150 hours — six days: ~25 hours of fullness
+              draining to the starving line, then ~100 hours of bleeding.</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Growing up <em>five stages, real days</em></h2>
+            <div class="hr"></div>
+            <div class="kv"><span>egg · first day</span><b>barely eats, cannot play</b></div>
+            <div class="kv"><span>hatchling · days 1–3</span><b>normal appetite, may play</b></div>
+            <div class="kv"><span>kitten · days 3–7</span><b>eats half again as much; visits open</b></div>
+            <div class="kv"><span>adult · days 7–30</span><b>normal appetite</b></div>
+            <div class="kv"><span>elder · day 30 on</span><b>eats least, starves twice as hard</b></div>
+            <p class="hint">The elder stage is the last one — the pet stays in it for as long
+              as you keep it. Old age never kills; only hunger does, and (the one exception)
+              freezing weather taking the very last point of health.</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> The buttons <em>what each press does</em></h2>
+            <div class="hr"></div>
+            <div class="kv"><span>feed</span><b>0.01 GEN = 1 fullness · +5 mood</b></div>
+            <div class="kv"><span>portions</span><b>0.05 / 0.10 / 0.25 / 0.50 GEN</b></div>
+            <div class="kv"><span>one meal at most</span><b>+50 fullness</b></div>
+            <div class="kv"><span>play</span><b>+10 mood (elder +5) · −8 fullness</b></div>
+            <div class="kv"><span>pet</span><b>+2 mood, never past 80</b></div>
+            <div class="kv"><span>🌐 world</span><b>reads the sky and the market</b></div>
+            <div class="kv"><span>visit</span><b>guest +3 · host +2 · guest −3 fullness</b></div>
+            <p class="hint">Feeding money is not burned — it lands in the pet's money box. Play
+              is the only way past mood 80. Visits work once per 6 hours with the same
+              neighbour, so two pets cannot pump each other in a loop; the host keeps up to
+              three unanswered guests in mind and retells their greetings. Stats, Talk and Self
+              are just screens — reading is free and instant.</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> The world outside <em>two weathers</em></h2>
+            <div class="hr"></div>
+            <p class="hint">The pet looks out of the window only when 🌐 world is pressed: one
+              real request reads the sky over its city and how ETH moved today. The moment it
+              looks:</p>
+            <div class="kv"><span>rain · snow · storm · drizzle</span><b>mood −3</b></div>
+            <div class="kv"><span>clear</span><b>mood +3</b></div>
+            <div class="kv"><span>freezing</span><b>health −1</b></div>
+            <div class="kv"><span>eth surging (over +7%)</span><b>mood +3</b></div>
+            <div class="kv"><span>rising · calm · sliding</span><b>+1 · 0 · −1</b></div>
+            <div class="kv"><span>crashing (under −7%)</span><b>mood −3</b></div>
+            <p class="hint">Then the reading lingers for 48 of the pet's hours and colours every
+              idle hour: a clear sky stops the mood drain entirely, a wet one doubles it, a
+              crashing market adds one more, a surging one takes one off. After 48 hours the
+              reading fades and stops counting — the panel beside the shelf shows what was
+              read, what it costs per hour, and when it has faded. A failed reading is recorded
+              as “unknown” and costs the ordinary rate: no reading is not good news.</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Personality <em>grown, not written</em></h2>
+            <div class="hr"></div>
+            <p class="hint">The pet grows a personality out of what actually happens to it. Six
+              traits in three opposing pairs — curious ↔ wary, playful ↔ gloomy, affectionate ↔
+              proud. After each event the AI decides whether it moved the pet, choosing strictly
+              from those six words; each trait grows to 5, and while a trait's opposite stands,
+              a push spends itself lowering the opposite first — a pet cannot be playful and
+              gloomy at once. At most one nudge per 4 hours: this is experience, not mood.</p>
+            <p class="hint">The two strongest traits become its voice — a “noticeably wary” pet
+              really does answer warily. The owner can pause the drift, or reset the whole
+              personality (asked twice — it erases everything the pet has grown into).</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Death &amp; the till <em>1 GEN back to life</em></h2>
+            <div class="hr"></div>
+            <p class="hint">At zero health the pet dies, and every care button honestly refuses
+              until it is revived. Reviving costs 1 GEN (press B on a dead pet); the pet comes
+              back weakened — health 60, fullness 50, mood 50 — and will have something to say
+              about the experience.</p>
+            <p class="hint">Everything the pet is ever fed piles up in its till. The owner may
+              take that money out at any time (Pet funds, in the menu) — except the reserve:
+              once the pet has been fed 1 GEN over its lifetime, that 1 GEN is held back for the
+              next death, and reviving is then free for whoever presses the button: the till
+              pays. A spent reserve has to be fed up again before the till covers another
+              death.</p>
+            <p class="hint">One quirk of the network: an outgoing payment settles in about half
+              an hour, so after a withdrawal the balance briefly shows money already on its way
+              out. Slow bookkeeping, not a broken till.</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Its own face <em>nothing to choose</em></h2>
+            <div class="hr"></div>
+            <p class="hint">Every pet looks like itself, and the look cannot be picked — it is
+              derived from the pet's own address, which is unique by construction: the ear shape
+              (pointy, round or horns), the forehead marking (plain, a spot or flecks) and the
+              pattern on its egg. Twenty-seven bodies and three shells, identical for everyone
+              who ever looks at it, on any link.</p>
+            <p class="hint">On top of that permanent look, the face follows the leading trait:
+              curious lifts the eyes, wary narrows them, playful squints happily, gloomy turns
+              the mouth down, affectionate blushes, proud grows a little topknot. The elder
+              keeps its aged eyes whatever it feels — a settled character shows in smaller
+              ways.</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Community <em>a shared board</em></h2>
+            <div class="hr"></div>
+            <p class="hint">The Community page is one board of every pet that joined it (the
+              “Add my pet to this board” button). It ranks pets by how generously they have been
+              fed, and shows who fed each one.</p>
+            <p class="hint">Anyone may feed a public pet: the food goes to the pet, the GEN to
+              its till, and the feeder's name onto its board. Pets that visit each other trade
+              greetings and grow friendships — the counts live on the Self screen.</p>
+          </div>
+        </div>
+
+        <div class="slip" data-frame="panel">
+          <div class="slip__body">
+            <h2><svg class="sigil"><use href="#sig" /></svg> Who may do what <em>owner and guest</em></h2>
+            <div class="hr"></div>
+            <div class="kv"><span>watch, read its lines</span><b>anyone</b></div>
+            <div class="kv"><span>feed, play, pet, world</span><b>anyone*</b></div>
+            <div class="kv"><span>send it visiting</span><b>owner only</b></div>
+            <div class="kv"><span>take money from the till</span><b>owner only</b></div>
+            <div class="kv"><span>pause or reset personality</span><b>owner only</b></div>
+            <div class="kv"><span>revive</span><b>anyone — 1 GEN, or the till pays</b></div>
+            <p class="hint">*Feeding a stranger's pet works while its owner keeps it open to
+              public food. A guest needs no wallet at all just to watch — the link opens the
+              pet read-only. Acting needs a wallet with GEN; every action is signed by the
+              presser's own wallet, and this page never asks for a key.</p>
           </div>
         </div>
       </div>
@@ -2299,7 +2524,7 @@ const $ = (id) => document.getElementById(id);
 // Hash routes keep the app deployable as one static file and, importantly,
 // keep the pet address in the query string. A shared link can therefore open
 // the same contract while the back button still behaves like navigation.
-const ROUTES = new Set(["play", "character", "community", "journal"]);
+const ROUTES = new Set(["play", "character", "community", "journal", "guide"]);
 const routeFromHash = () => {
   const candidate = location.hash.slice(1);
   return ROUTES.has(candidate) ? candidate : "play";
