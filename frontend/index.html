@@ -1061,6 +1061,8 @@
   .page-intro > p:last-child { margin: 0; color: var(--ink-dim); font-size: 15px; line-height: 1.45; }
   .page-intro--solo { grid-template-columns: 1fr; }
   .page-intro--solo > div { max-width: 780px; }
+  .personality-intro, .community-intro { text-align: center; }
+  .personality-intro > div, .community-intro > div { max-width: none; }
   .page-grid { display: grid; gap: 24px; }
   .page-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .content-page .slips { display: contents; }
@@ -1286,9 +1288,8 @@
     </section>
 
     <section class="app-page content-page" data-page="character" hidden>
-      <div class="page-intro">
+      <div class="page-intro page-intro--solo personality-intro">
         <div><h2>Personality</h2></div>
-        <p>Your pet’s personality changes based on what happens to it.</p>
       </div>
       <div class="page-grid personality-grid">
         <div class="slip" data-frame="panel" id="charBox" hidden>
@@ -1305,18 +1306,16 @@
     </section>
 
     <section class="app-page content-page community-page" data-page="community" hidden>
-      <div class="page-intro">
-        <div><p class="page-intro__eyebrow">The shared world</p><h2>Community</h2></div>
-        <p>Meet every pet living on the shared board. Hover over one to see who has kept it fed.</p>
+      <div class="page-intro page-intro--solo community-intro">
+        <div><h2>Community</h2></div>
       </div>
       <div class="page-grid">
         <div class="slip" data-frame="panel" id="dirBox" hidden>
           <div class="slip__body">
-            <h2><svg class="sigil"><use href="#sig" /></svg> Every pet <em>hover to see who fed them</em></h2>
+            <h2><svg class="sigil"><use href="#sig" /></svg> All pets <em id="dirMeta" aria-live="polite"></em></h2>
             <div class="hr"></div>
-            <p class="hint" style="margin-top:0">Visit sends your pet round to say hello. Feed
-              puts a meal directly into a stranger's pet. Focus or tap a row on touch devices.</p>
-            <p class="hint" id="dirMeta"></p>
+            <p class="hint" style="margin-top:0">Select a pet to see who has fed it. Use <b>Visit</b>
+              to say hello or <b>Feed</b> to send a meal.</p>
             <ol class="board community-directory" id="directory" style="margin-top:10px"></ol>
             <button class="press" id="joinDir" style="margin-top:14px" disabled>Add my pet to this board</button>
           </div>
@@ -2657,7 +2656,7 @@ async function runPending() {
   if (m.key === "visit") {
     const host = visitTarget.trim();
     if (!/^0x[0-9a-fA-F]{40}$/.test(host)) {
-      setStatus("Pick who to visit first — press Visit on a row of Every pet below.", "err");
+      setStatus("Pick who to visit first — press Visit next to a pet in the Community list.", "err");
       ui.message = "pick a pet"; ui.view = "home"; return;
     }
     if (host.toLowerCase() === address.toLowerCase()) {
@@ -3901,7 +3900,7 @@ async function loadDirectory({ announce }) {
     ]);
     const n = Number(info.pets);
     $("dirMeta").textContent =
-      `${n} pet${n === 1 ? "" : "s"} registered · ${info.open_to_all ? "open to anyone" : "admin-only"}`;
+      `${n} pet${n === 1 ? "" : "s"} · ${info.open_to_all ? "anyone can join" : "invite only"}`;
     const me = (address || "").toLowerCase();
     $("directory").innerHTML = rows.length
       ? rows.map((r, i) => {
