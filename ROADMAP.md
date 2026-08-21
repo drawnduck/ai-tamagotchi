@@ -1,7 +1,32 @@
 # AiPet — status & roadmap
 
 Where the project stands, what is actually proven, and what comes next.
-Last updated: 2026-08-10.
+Last updated: 2026-08-22.
+
+---
+
+## 0. What shipped after 2026-08-10 (the redesign wave)
+
+The sections below this one describe the contract era and are kept as written; everything in this
+block landed on the `gameplay-mechanics` branch between 2026-08-12 and 2026-08-22 and is live.
+
+- **Production hosting.** The site runs at **https://youraipet.xyz** behind Caddy, deployed by
+  [`deploy/deploySite.sh`](deploy/deploySite.sh) (build → self-containment checks → rsync → health
+  check). GitHub Pages remains as the second, `main`-only publish path.
+- **Frontend redesign.** The device page became an app: hash-routed pages (Play / Personality /
+  Community / Journal / Guide), a hamburger menu, a wallet-bound pet shelf, hatch/personality/funds
+  dialogs, and a start screen that never auto-opens a pet the visitor did not ask for.
+- **Per-pet appearance.** Ears, forehead marking and egg shell derive from the pet's contract
+  address (27 bodies + 3 shells); the face follows the leading character trait. No contract change.
+- **The world rail.** A panel beside the device shows the last weather/market reading and the exact
+  hourly mood drain the contract will bill, fading when the contract stops charging (48 pet-hours).
+- **The rules.** A leather field manual beside the device (art in `frontend/assets/`) opens a
+  five-rule capsule; **06 Guide** is the full rulebook — the English rendition of
+  [`docs/game-logic.md`](docs/game-logic.md). Russian sources live in [`docs/`](docs/).
+- **Resilience.** Sends refused by a saturated node ("gas rate limit exceeded … retry in ~832ms")
+  are retried automatically with the node's own suggested delay, up to six attempts.
+- Old-contract pets (pre-redesign hatches) are read-only relics: they lack the world fields and
+  never fill the world rail. The shelf filters them out — see §5 note at the end.
 
 ---
 
@@ -979,18 +1004,15 @@ node tools/watchTx.mjs <txHash> <contractAddress>     # poll status + balance
 node tools/finalizeTx.mjs <txHash> <contractAddress>  # finalize, then flush messages
 ```
 
-What is left in this phase:
+What is left in this phase: **nothing.**
 
-1. **Click one write from the browser.** Reads from Bradbury are verified in the page (live state,
-   leaderboard, and owner-gating of the withdraw panel all render correctly); a write needs a funded
-   key pasted into the page by its owner.
+1. ~~Click one write from the browser.~~ **Done** — hatching, feeding, playing, world checks and
+   withdraw all run from the page with a connected wallet, daily, on youraipet.xyz.
 2. ~~Port `tests/integration/` to `genlayer-js`.~~ **Done** —
    [`tests/network/aiPet.test.mjs`](tests/network/aiPet.test.mjs), `npm run test:network`. The four
    gas-free guard assertions were run green against a live Bradbury pet; the value assertions are
    waiting on the network (§3b). The old suite is kept but marked superseded in its own header.
-3. `revive()` end to end — needs a dead pet, which needs 150 h of idle time; see Phase 4.
-
-**Done when:** §3's "Not proven" table is down to the rows that need a dead pet.
+3. ~~`revive()` end to end.~~ **Done** — exercised on Bradbury via the Phase 4 demo clock.
 
 ### Phase 2 — Localnet (optional fallback)
 
@@ -1060,13 +1082,18 @@ last mechanic that had never been exercised outside direct mode.
 
 ## 6. Decisions needed from you
 
-1. **Testnet key?** The one thing blocking Phase 1, and only you can supply it — faucet → `.env`.
-   Without it the value path stays unverified no matter what else gets built. Docker/localnet is a
-   fallback, not a requirement (§5 Phase 2).
-2. **Configurable decay (Phase 4)?** It changes the constructor signature — worth deciding before
-   any address gets published anywhere.
-3. **How much faucet GEN is available?** Decides whether the full integration suite runs or only the
-   `withdraw`/`leaderboard` subset.
+All three original decisions are resolved: the testnet key exists and the value path has run
+(Phase 1), `time_scale` shipped as the one decay knob (Phase 4), and faucet GEN has covered every
+live run to date. Decided 2026-08-22: pets on the pre-redesign contract are dead weight — the shelf
+filters them out rather than dressing them up.
+
+Nothing is currently blocked on a decision. Open product questions, none urgent:
+
+1. **A "rebirth" offer for old-contract pets?** A one-press "hatch a successor with the same name
+   and city" would let owners of relic pets migrate voluntarily.
+2. **The appearance gallery in-game?** All 49 sprite variants exist as an internal gallery page;
+   worth deciding whether players should see the full bestiary or keep discovering looks by
+   hatching.
 
 ---
 
