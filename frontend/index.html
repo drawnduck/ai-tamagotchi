@@ -3338,7 +3338,7 @@ function renderWorldRail() {
   }
   if (fresh && String(pet.temp || "") === "freezing") {
     chips.push(`<div class="world-chip world-chip--danger"><b>❄ freezing</b>`
-      + `<span>a check in this cold costs health</span></div>`);
+      + `<span>looking outside in this cold costs health</span></div>`);
   }
   if (!chips.length) {
     // Three different reasons to have nothing to show, each with its own
@@ -3346,9 +3346,9 @@ function renderWorldRail() {
     // moment of a Check and keeps no reading, so telling its owner to press
     // Check "to fill this in" would be a promise the contract cannot keep.
     const note = !("condition" in pet)
-      ? "this older pet feels the weather only while a Check runs"
-      : has ? "the last look was over two days ago — press Check to look again"
-            : "press Check: the pet looks at the real sky here and at the eth market";
+      ? "this older pet feels the weather only in the moment it looks"
+      : has ? "the last look was over two days ago — press 🌐 world on the device to look again"
+            : "press 🌐 world on the device: the pet reads the real sky here and the eth market";
     chips.push(`<div class="world-chip"><b>☁ sky unknown</b><span>${note}</span></div>`);
   }
   const drain = hourlyMoodDrain(fresh);
