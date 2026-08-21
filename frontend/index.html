@@ -1015,6 +1015,12 @@
     letter-spacing: .15em; text-transform: uppercase; color: var(--ink-dim);
   }
   .pet-rail__hidden:hover { color: var(--ink); }
+  @media (min-width: 941px) {
+    .app-shell:has(#petRail:not([hidden])) .rules-launch {
+      right: 166px;
+      bottom: 18px;
+    }
+  }
   @media (max-width: 940px) {
     /* off the device's flank, tucked above the status console */
     .pet-rail { right: 8px; top: auto; bottom: 82px; transform: none; width: 108px; max-height: 38vh; }
