@@ -675,8 +675,8 @@
   .voice { margin: 0 0 22px; font-size: 20px; line-height: 1.4; color: var(--ink); }
   .voice b { font-weight: 400; color: #7a4116; border-bottom: 1px solid rgba(122,65,22,.35); }
   .voice .voice-effect {
-    display: block; margin-top: 6px; font-family: var(--mono); font-size: 8px;
-    letter-spacing: .07em; color: var(--ink-faint);
+    display: block; margin-top: 7px; font-family: var(--mono); font-size: 11px;
+    line-height: 1.4; letter-spacing: .06em; color: var(--ink-dim);
   }
 
   .traits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
@@ -914,28 +914,28 @@
   /* ── the shelf: every pet this wallet owns, one press away ───────────── */
   .pet-rail {
     position: fixed; z-index: 60; right: 12px; top: 50%; transform: translateY(-50%);
-    display: flex; flex-direction: column; gap: 7px; width: 110px;
-    max-height: min(70vh, 520px); overflow-y: auto; padding: 9px 7px;
+    display: flex; flex-direction: column; gap: 8px; width: 128px;
+    max-height: min(72vh, 560px); overflow-y: auto; padding: 11px 9px;
     border-radius: 15px; background: rgba(222,220,216,.85); backdrop-filter: blur(9px);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.85), inset 0 0 0 1px rgba(28,29,31,.08),
       0 10px 26px rgba(18,20,16,.16);
   }
   .pet-rail__label {
-    margin: 0 0 1px; font-family: var(--mono); font-size: 7px; font-weight: 700;
-    letter-spacing: .24em; text-transform: uppercase; color: var(--ink-faint); text-align: center;
+    margin: 0 0 2px; font-family: var(--mono); font-size: 9px; font-weight: 700;
+    letter-spacing: .2em; text-transform: uppercase; color: var(--ink-dim); text-align: center;
   }
   .pet-chip {
-    display: grid; gap: 2px; width: 100%; padding: 7px 8px; border: 0; border-radius: 10px;
+    display: grid; gap: 3px; width: 100%; padding: 9px 10px; border: 0; border-radius: 11px;
     cursor: pointer; text-align: left; background: rgba(255,255,255,.5); color: var(--ink-dim);
     font-family: var(--mono);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 1px 2px rgba(0,0,0,.12);
     transition: transform .12s ease, background .15s ease, color .15s ease;
   }
   .pet-chip b {
-    font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .pet-chip span { font-size: 7px; letter-spacing: .06em; color: var(--ink-faint); }
+  .pet-chip span { font-size: 9px; line-height: 1.35; letter-spacing: .045em; color: var(--ink-faint); }
   .pet-chip:hover { transform: translateX(-2px); color: var(--ink); background: rgba(255,255,255,.75); }
   .pet-chip.current {
     color: var(--ink); background: var(--chrome-pill); background-size: 100% 260%;
@@ -944,7 +944,7 @@
   }
   .pet-chip.current span { color: var(--ink-dim); }
   .pet-chip--new { text-align: center; background: rgba(255,255,255,.3); }
-  .pet-chip--new b { font-size: 12px; }
+  .pet-chip--new b { font-size: 14px; }
   .pet-slot { position: relative; display: block; }
   .pet-slot .pet-chip { padding-right: 18px; }
   .pet-hide {
@@ -958,14 +958,14 @@
   .pet-hide:hover { color: var(--ink); }
   .pet-chip.ghost { opacity: .45; }
   .pet-rail__hidden {
-    border: 0; background: transparent; cursor: pointer; padding: 2px 0;
-    font-family: var(--mono); font-size: 7px; font-weight: 700;
-    letter-spacing: .18em; text-transform: uppercase; color: var(--ink-faint);
+    border: 0; background: transparent; cursor: pointer; padding: 3px 0;
+    font-family: var(--mono); font-size: 9px; font-weight: 700;
+    letter-spacing: .15em; text-transform: uppercase; color: var(--ink-dim);
   }
   .pet-rail__hidden:hover { color: var(--ink); }
   @media (max-width: 940px) {
     /* off the device's flank, tucked above the status console */
-    .pet-rail { right: 8px; top: auto; bottom: 76px; transform: none; width: 94px; max-height: 38vh; }
+    .pet-rail { right: 8px; top: auto; bottom: 82px; transform: none; width: 108px; max-height: 38vh; }
   }
 
   /* ── the world rail: what the city is doing to the mood, at a glance ──
@@ -973,39 +973,39 @@
      shelf so the two read as one instrument panel. Read-only on purpose:
      the world is not a control, it is a window. */
   .world-rail {
-    position: fixed; z-index: 60; right: 138px; top: 50%; transform: translateY(-50%);
-    display: flex; flex-direction: column; gap: 7px; width: 110px; padding: 9px 7px;
+    position: fixed; z-index: 60; right: 156px; top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 8px; width: 128px; padding: 11px 9px;
     border-radius: 15px; background: rgba(222,220,216,.85); backdrop-filter: blur(9px);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.85), inset 0 0 0 1px rgba(28,29,31,.08),
       0 10px 26px rgba(18,20,16,.16);
   }
   .world-rail__label {
-    margin: 0 0 1px; font-family: var(--mono); font-size: 7px; font-weight: 700;
-    letter-spacing: .24em; text-transform: uppercase; color: var(--ink-faint);
+    margin: 0 0 2px; font-family: var(--mono); font-size: 9px; font-weight: 700;
+    letter-spacing: .2em; text-transform: uppercase; color: var(--ink-dim);
     text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .world-chip {
-    display: grid; gap: 2px; padding: 7px 8px; border-radius: 10px;
+    display: grid; gap: 3px; padding: 9px 10px; border-radius: 11px;
     background: rgba(255,255,255,.5); color: var(--ink-dim); font-family: var(--mono);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 1px 2px rgba(0,0,0,.12);
   }
   .world-chip b {
-    font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .world-chip span { font-size: 7px; letter-spacing: .06em; line-height: 1.45; color: var(--ink-faint); }
+  .world-chip span { font-size: 9px; letter-spacing: .045em; line-height: 1.45; color: var(--ink-faint); }
   .world-chip--good b { color: #3d6b1f; }
   .world-chip--bad b { color: #8a3018; }
   .world-chip--danger { background: rgba(164,75,45,.14); }
   .world-chip--danger b { color: #8a3018; }
   .world-rail__net {
-    margin: 1px 0 0; padding: 2px 0 0; font-family: var(--mono); font-size: 7px;
-    font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
-    color: var(--ink-faint); text-align: center; line-height: 1.5;
+    margin: 1px 0 0; padding: 3px 0 0; font-family: var(--mono); font-size: 9px;
+    font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-dim); text-align: center; line-height: 1.5;
   }
   @media (max-width: 940px) {
     /* the shelf holds the right flank, so the world takes the left one */
-    .world-rail { right: auto; left: 8px; top: auto; bottom: 76px; transform: none; width: 94px; }
+    .world-rail { right: auto; left: 8px; top: auto; bottom: 82px; transform: none; width: 108px; }
   }
 
   /* ── new life: the pet shelf expands into a compact centre dialog ───── */
@@ -1082,10 +1082,10 @@
   #status.console {
     position: fixed; z-index: 75; left: 50%; bottom: 18px; width: max-content;
     max-width: min(560px, calc(100vw - 32px)); transform: translateX(-50%);
-    margin: 0; padding: 8px 13px; border-radius: 999px;
+    margin: 0; padding: 9px 15px; border-radius: 999px;
     color: var(--phos); background: rgba(12,13,9,.84); backdrop-filter: blur(12px);
     box-shadow: inset 0 0 0 1px rgba(163,230,104,.12), 0 10px 30px rgba(18,20,16,.2);
-    font-family: var(--mono); font-size: 8px; line-height: 1.35; letter-spacing: .06em;
+    font-family: var(--mono); font-size: 10.5px; line-height: 1.4; letter-spacing: .045em;
     text-align: center; white-space: pre-line;
   }
   #status.console.err { color: #ffb09d; }
@@ -1094,8 +1094,8 @@
   .content-page { width: min(930px, 100%); margin: 0 auto; padding: 34px 0 70px; }
   .page-intro { display: grid; grid-template-columns: 1fr minmax(220px, 42%); gap: 28px; align-items: end; margin-bottom: 34px; }
   .page-intro__eyebrow {
-    margin: 0 0 10px; font-family: var(--mono); font-size: 8px; font-weight: 700;
-    letter-spacing: .24em; text-transform: uppercase; color: var(--ink-faint);
+    margin: 0 0 11px; font-family: var(--mono); font-size: 11px; font-weight: 700;
+    line-height: 1.35; letter-spacing: .18em; text-transform: uppercase; color: var(--ink-dim);
   }
   .page-intro h2 { margin: 0; font-family: var(--serif); font-size: clamp(40px, 8vw, 80px); font-weight: 400; line-height: .92; letter-spacing: -.035em; }
   .page-intro > p:last-child { margin: 0; color: var(--ink-dim); font-size: 15px; line-height: 1.45; }
