@@ -1608,7 +1608,7 @@ function wrap(str, width = CHARS_PER_LINE) {
   return lines.length ? lines : [""];
 }
 
-// ── the pet, 16×16, one sprite per life stage ─────────────────────────────
+// ── the pet, 16×16, one base body per life stage ──────────────────────────
 const SPRITES = {
   egg: [
     "................", ".....######.....", "....########....", "...####..####...",
@@ -1648,8 +1648,164 @@ const SPRITES = {
   ],
 };
 
+// ── appearance: one species, many pets ────────────────────────────────────
+// Two pets on the same stage used to be pixel-identical. The permanent parts
+// — ear shape, forehead marking, egg shell — now come from bytes of the pet's
+// own contract address: already unique, free, and the same for every viewer
+// of the same pet, so a shared link shows the pet its owner knows. On top of
+// that the face follows the leading character trait, so a pet gradually LOOKS
+// like what it has lived through. No new contract field, no choice at hatch:
+// a pet deployed years ago grows its look retroactively.
+
+// Ear caps replace base rows 0–4 wholesale; row 5 of each base is the seam
+// they all agree with. Adult and elder share a skull, so they share caps.
+const ADULT_CAPS = [
+  [ // pointy — the original
+    "..#..........#..", "..##........##..", "..#.#......#.#..",
+    "..#..######..#..", ".##..........##.",
+  ],
+  [ // round
+    "................", ".###........###.", ".####......####.",
+    ".###.######.###.", ".##..........##.",
+  ],
+  [ // horns
+    ".#............#.", ".##..........##.", "..##........##..",
+    "..#..######..#..", ".##..........##.",
+  ],
+];
+const EAR_CAPS = {
+  kitten: [
+    [ // pointy — the original
+      "................", "..##........##..", "..###......###..",
+      "..#.##....##.#..", "..#..######..#..",
+    ],
+    [ // round
+      "................", "..##........##..", ".####......####.",
+      ".####......####.", "..#..######..#..",
+    ],
+    [ // horns
+      "..#..........#..", "..##........##..", "...##......##...",
+      "..#.#......#.#..", "..#..######..#..",
+    ],
+  ],
+  adult: ADULT_CAPS,
+  elder: ADULT_CAPS,
+};
+
+// Egg shells are whole sprites — the pattern IS the egg — and double as a
+// promise: the shell already says which pet this address will always be.
+const EGG_SHELLS = [
+  null, // zigzag — the original, filled in from SPRITES.egg below
+  [ // speckled
+    "................", ".....######.....", "....########....", "...##..######...",
+    "..############..", "..#######..###..", ".##############.", ".###..#########.",
+    ".##############.", ".#########..###.", "..############..", "..####..######..",
+    "...##########...", "....########....", ".....######.....", "................",
+  ],
+  [ // banded
+    "................", ".....######.....", "....########....", "...##########...",
+    "..############..", "..############..", ".##.##.##.##.##.", ".##############.",
+    ".##..##..##..##.", ".##############.", "..############..", "..############..",
+    "...##########...", "....########....", ".....######.....", "................",
+  ],
+];
+EGG_SHELLS[0] = SPRITES.egg;
+
+// Sparse overlays on the composed body: '#' paints, '-' erases, '.' leaves
+// alone. Markings sit on the forehead, clear of every cap and every mood.
+const MARKS = {
+  kitten: [[], [{ r: 5, c: 7, s: "##" }], [{ r: 5, c: 5, s: "#.#.#" }]],
+  adult:  [[], [{ r: 4, c: 7, s: "##" }], [{ r: 4, c: 5, s: "#.#.#" }]],
+  elder:  [[], [{ r: 4, c: 7, s: "##" }], [{ r: 4, c: 5, s: "#.#.#" }]],
+};
+
+// The face of each trait, one per pair-half. The elder keeps its aged eyes
+// whatever it feels — a settled character shows in smaller ways — and the
+// hatchling is too briefly a hatchling to bother. Missing key = no change.
+const TUFT_KITTEN = [{ r: 2, c: 7, s: "##" }, { r: 3, c: 7, s: "##" }];
+const TUFT = [{ r: 1, c: 7, s: "##" }, { r: 2, c: 7, s: "##" }];
+const MOODS = {
+  kitten: {
+    curious:      [{ r: 5, c: 4, s: "##" }, { r: 5, c: 10, s: "##" },   // eyes lifted, looking out
+                   { r: 7, c: 4, s: "--" }, { r: 7, c: 10, s: "--" }],
+    wary:         [{ r: 6, c: 4, s: "--" }, { r: 6, c: 10, s: "--" },   // narrowed, glancing inward
+                   { r: 7, c: 4, s: "-." }, { r: 7, c: 10, s: ".-" }],
+    playful:      [{ r: 7, c: 4, s: "--" }, { r: 7, c: 10, s: "--" }],  // happy squint
+    gloomy:       [{ r: 6, c: 4, s: "--" }, { r: 6, c: 10, s: "--" },   // low eyes, mouth turned down
+                   { r: 9, c: 5, s: "-....-" }, { r: 10, c: 5, s: "#....#" }],
+    affectionate: [{ r: 8, c: 3, s: "#" }, { r: 8, c: 12, s: "#" }],    // blush
+    proud:        [...TUFT_KITTEN, { r: 10, c: 6, s: "----" }],         // topknot, level mouth
+  },
+  adult: {
+    curious:      [{ r: 4, c: 4, s: "##" }, { r: 4, c: 10, s: "##" },
+                   { r: 6, c: 4, s: "--" }, { r: 6, c: 10, s: "--" }],
+    wary:         [{ r: 5, c: 4, s: "--" }, { r: 5, c: 10, s: "--" },
+                   { r: 6, c: 4, s: "-." }, { r: 6, c: 10, s: ".-" }],
+    playful:      [{ r: 6, c: 4, s: "--" }, { r: 6, c: 10, s: "--" },   // squint, mouth turned up
+                   { r: 8, c: 5, s: "#....#" }, { r: 9, c: 5, s: "-....-" }],
+    gloomy:       [{ r: 5, c: 4, s: "--" }, { r: 5, c: 10, s: "--" }],  // the adult mouth already sags
+    affectionate: [{ r: 7, c: 3, s: "#" }, { r: 7, c: 12, s: "#" }],
+    proud:        [...TUFT, { r: 8, c: 6, s: "----" }],
+  },
+  elder: {
+    affectionate: [{ r: 6, c: 3, s: "#" }, { r: 6, c: 12, s: "#" }],
+    proud:        TUFT,
+  },
+};
+
+function applyOps(rows, ops) {
+  const grid = rows.map((r) => r.split(""));
+  for (const { r, c, s } of ops)
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === "#") grid[r][c + i] = "#";
+      else if (s[i] === "-") grid[r][c + i] = ".";
+    }
+  return grid.map((r) => r.join(""));
+}
+
+// Which parts this address wears. Distinct bytes for distinct parts, so two
+// pets sharing an ear shape still differ elsewhere. No address yet — the
+// splash egg before anything is open — falls back to the original look.
+function petLook() {
+  const hex = String(address || "").toLowerCase().replace(/^0x/, "");
+  const byte = (i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16) || 0;
+  return { shell: byte(0) % EGG_SHELLS.length, ears: byte(1) % 3, mark: byte(2) % 3 };
+}
+
+// The strongest trait, chosen the way the contract chooses its prompt lead:
+// highest level wins, ties break by position, zero counts for nothing.
+function leadTraitName() {
+  const traits = Array.isArray(character?.traits) ? character.traits : [];
+  let best = null;
+  for (const t of traits) {
+    const level = Number(t?.level) || 0;
+    if (level > 0 && (!best || level > best.level)) best = { name: String(t.name), level };
+  }
+  return best ? best.name : "";
+}
+
+// Composition is cheap but runs at 7fps, so finished sprites are memoised.
+// The key carries everything that feeds the result; nothing to invalidate.
+const spriteCache = new Map();
+function spriteRows(name) {
+  const look = petLook(), mood = leadTraitName();
+  const key = `${name}|${look.shell}|${look.ears}|${look.mark}|${mood}`;
+  let rows = spriteCache.get(key);
+  if (!rows) {
+    if (name === "egg") rows = EGG_SHELLS[look.shell];
+    else if (!EAR_CAPS[name]) rows = SPRITES[name] ?? SPRITES.egg;
+    else {
+      rows = [...EAR_CAPS[name][look.ears], ...SPRITES[name].slice(5)];
+      const ops = [...MARKS[name][look.mark], ...(MOODS[name][mood] ?? [])];
+      if (ops.length) rows = applyOps(rows, ops);
+    }
+    spriteCache.set(key, rows);
+  }
+  return rows;
+}
+
 function drawSprite(name, x, y) {
-  const rows = SPRITES[name] ?? SPRITES.egg;
+  const rows = spriteRows(name);
   for (let r = 0; r < rows.length; r++)
     for (let c = 0; c < rows[r].length; c++)
       if (rows[r][c] === "#") px(x + c, y + r);
