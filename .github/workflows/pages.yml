@@ -55,13 +55,22 @@ jobs:
         # The one way this site can break after publishing is a relative
         # <script src>/<link href> that worked locally and 404s under the
         # /<repo>/ path prefix Pages serves from. Catch it here rather than in
-        # a screenshot of a blank page.
+        # a screenshot of a blank page. References into assets/ are the one
+        # allowed relative form: the directory is uploaded with the page, so
+        # they resolve under the prefix too — as long as each file exists,
+        # which the loop checks.
         run: |
-          if grep -nE '<(script|link)[^>]+(src|href)="[^"h#/]' frontend/index.html; then
-            echo "::error::relative asset reference — it will 404 under the Pages path prefix"
+          if grep -nE '<(script|link)[^>]+(src|href)="[^"h#/]' frontend/index.html | grep -v '"assets/'; then
+            echo "::error::relative asset reference outside assets/ — it will 404 under the Pages path prefix"
             exit 1
           fi
-          echo "no relative asset references"
+          for ref in $(grep -oE 'assets/[A-Za-z0-9._-]+' frontend/index.html | sort -u); do
+            if [ ! -f "frontend/$ref" ]; then
+              echo "::error::page references frontend/$ref which does not exist"
+              exit 1
+            fi
+          done
+          echo "no unresolved asset references"
 
       - name: Build the contract the page deploys
         # The page hatches a pet by fetching this file and deploying it, so the

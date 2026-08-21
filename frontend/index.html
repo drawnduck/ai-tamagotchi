@@ -562,28 +562,6 @@
   .hr { height: 8px; margin: 0 0 16px; opacity: .55;
         background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='26' height='8' viewBox='0 0 26 8'><path d='M0 4 q3.25 -3.4 6.5 0 t6.5 0 t6.5 0 t6.5 0' fill='none' stroke='%231c1d1f' stroke-width='1.1'/></svg>") repeat-x center; }
 
-  /* ── the two steps between a stranger and a pet ──────────────────────── */
-  .steps { list-style: none; margin: 0; padding: 0; }
-  .step { display: grid; grid-template-columns: 24px 1fr; gap: 14px; align-items: start; }
-  .step + .step { margin-top: 18px; padding-top: 18px;
-    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='26' height='8' viewBox='0 0 26 8'><path d='M0 4 q3.25 -3.4 6.5 0 t6.5 0 t6.5 0 t6.5 0' fill='none' stroke='%231c1d1f' stroke-opacity='.4' stroke-width='1.1'/></svg>") repeat-x top; }
-  .num {
-    width: 22px; height: 22px; border-radius: 7px; margin-top: 1px;
-    font-family: var(--mono); font-size: 10.5px; font-weight: 700; line-height: 22px;
-    text-align: center; color: #1e2125;
-    background: var(--chrome-pill);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(0,0,0,.3), 0 1px 2px rgba(0,0,0,.3);
-  }
-  .step.done .num { color: #16460f; background: linear-gradient(178deg, #dff5cd, #8ac96e 48%, #4f9a37); }
-  .step.done .num::after { content: "✓"; }
-  .step.done .num span { display: none; }
-  .steptitle {
-    margin: 3px 0 0; font-family: var(--mono); font-size: 11px; font-weight: 700;
-    letter-spacing: .2em; text-transform: uppercase; color: #26292c;
-    text-shadow: 0 1px 0 rgba(255,255,255,.7);
-  }
-  .stepbody > * + * { margin-top: 11px; }
-
   /* A display serif set at reading size shouts. Gloock earns its keep one or
      two steps smaller than a text face would want. */
   .hint { margin: 9px 0 0; font-size: 14.5px; line-height: 1.45; color: var(--ink-dim); }
@@ -1001,6 +979,61 @@
     .pet-rail { right: 8px; top: auto; bottom: 76px; transform: none; width: 94px; max-height: 38vh; }
   }
 
+  /* ── new life: the pet shelf expands into a compact centre dialog ───── */
+  .pet-create-dialog {
+    inset: 0; width: min(328px, calc(100vw - 32px)); max-width: none; margin: auto;
+    padding: 0; border: 0; border-radius: 18px; overflow: visible;
+    color: var(--ink); background: rgba(222,220,216,.95);
+    backdrop-filter: blur(18px) saturate(.82);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 0 0 1px rgba(28,29,31,.1),
+      0 24px 70px rgba(18,20,16,.3);
+  }
+  .pet-create-dialog[open] { animation: pet-create-arrive .24s cubic-bezier(.2,.8,.2,1) both; }
+  .pet-create-dialog::backdrop {
+    background: rgba(31,32,31,.2); backdrop-filter: blur(5px);
+    animation: pet-create-backdrop .2s ease both;
+  }
+  @keyframes pet-create-arrive {
+    from { opacity: 0; transform: translateY(10px) scale(.965); }
+  }
+  @keyframes pet-create-backdrop { from { opacity: 0; } }
+  .pet-create-form { display: grid; gap: 13px; padding: 17px; }
+  .pet-create-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .pet-create-heading h2 {
+    margin: 0; font-family: var(--mono); font-size: 11px; font-weight: 700;
+    letter-spacing: .1em; color: var(--ink-dim);
+  }
+  .pet-create-close {
+    display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0;
+    border-radius: 50%; cursor: pointer; color: var(--ink-faint); background: rgba(255,255,255,.32);
+    font-family: var(--mono); font-size: 15px; line-height: 1;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.85); transition: color .15s ease, background .15s ease;
+  }
+  .pet-create-close:hover:not(:disabled) { color: var(--ink); background: rgba(255,255,255,.65); }
+  .pet-create-close:disabled { cursor: default; opacity: .4; }
+  .pet-create-field { display: grid; gap: 6px; }
+  .pet-create-field > span {
+    padding-left: 2px; font-family: var(--mono); font-size: 7px; font-weight: 700;
+    letter-spacing: .2em; text-transform: uppercase; color: var(--ink-faint);
+  }
+  .pet-create-field input {
+    width: 100%; padding: 10px 11px; border: 1px solid rgba(28,29,31,.08); border-radius: 10px;
+    color: var(--ink); background: rgba(255,255,255,.52); caret-color: var(--ink);
+    font-family: var(--mono); font-size: 10px; line-height: 1.3;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.92), 0 1px 2px rgba(0,0,0,.09);
+    transition: border-color .15s ease, background .15s ease, box-shadow .15s ease;
+  }
+  .pet-create-field input:focus {
+    outline: none; border-color: rgba(88,111,47,.45); background: rgba(255,255,255,.72);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.95), 0 0 0 3px rgba(125,153,70,.12);
+  }
+  .pet-create-field input:disabled { opacity: .55; }
+  .pet-create-note {
+    margin: -1px 1px 0; font-family: var(--mono); font-size: 8px; line-height: 1.5;
+    letter-spacing: .035em; color: var(--ink-faint);
+  }
+  .pet-create-submit { padding-block: 10px; font-size: 8px; }
+
   #status.console {
     position: fixed; z-index: 75; left: 50%; bottom: 18px; width: max-content;
     max-width: min(560px, calc(100vw - 32px)); transform: translateX(-50%);
@@ -1027,15 +1060,6 @@
   .page-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .content-page .slips { display: contents; }
   .content-page .slip { margin: 0; }
-  .setup-note {
-    display: grid; grid-template-columns: 26px 1fr; gap: 12px; align-items: start;
-    margin-bottom: 22px; padding-bottom: 20px; border-bottom: 1px solid rgba(28,29,31,.14);
-  }
-  .setup-note::before {
-    content: "01"; font-family: var(--mono); font-size: 8px; font-weight: 700;
-    letter-spacing: .1em; color: var(--ink-faint);
-  }
-  .setup-note.done::before { content: "✓"; color: #597e2e; }
   .developer-storage { display: none !important; }
 
   /* Community is one directory, not two unrelated reports. Feeder history is
@@ -1126,7 +1150,7 @@
     .pet-feeders-popover { left: 0; right: auto; width: 100%; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .app-page, .menu-popover { animation: none; }
+    .app-page, .menu-popover, .pet-create-dialog, .pet-create-dialog::backdrop { animation: none; }
   }
 </style>
 </head>
@@ -1187,7 +1211,6 @@
           <button type="button" data-route="character"><span class="nav-index">02</span><span>Character</span></button>
           <button type="button" data-route="community"><span class="nav-index">03</span><span>Community</span></button>
           <button type="button" data-route="journal"><span class="nav-index">04</span><span>Journal</span></button>
-          <button type="button" data-route="new-pet"><span class="nav-index">05</span><span>New pet</span></button>
         </nav>
         <div class="menu-utilities">
           <button class="press" id="refresh" type="button" disabled>Refresh</button>
@@ -1336,40 +1359,6 @@
       </div>
     </section>
 
-    <section class="app-page content-page" data-page="new-pet" hidden>
-      <div class="page-intro">
-        <div><p class="page-intro__eyebrow">A new on-chain life</p><h2>Hatch a pet</h2></div>
-        <p>Name it, choose the city whose real weather it will watch, and deploy its own contract.</p>
-      </div>
-      <div class="page-grid">
-        <div class="slip" data-frame="panel">
-          <div class="slip__body">
-            <div class="setup-note" id="stepWallet">
-              <div>
-                <p class="steptitle" style="margin-top:0">Connect a wallet from the top-right control</p>
-                <p class="hint" id="walletMeta">Your wallet signs each action. This page never sees its key.</p>
-              </div>
-            </div>
-            <ol class="steps">
-              <li class="step" id="stepPet">
-                <span class="num"><span>2</span></span>
-                <div class="stepbody">
-                  <p class="steptitle">Give it a beginning</p>
-                  <p class="hint" id="petMeta">Yours alone: a contract of its own, deployed by you.</p>
-                  <div class="field"><label for="petName">Name it</label>
-                    <input id="petName" placeholder="name it" maxlength="24" spellcheck="false" /></div>
-                  <div class="field"><label for="petCity">City</label>
-                    <input id="petCity" placeholder="city" value="Lisbon" spellcheck="false" /></div>
-                  <button class="press hot" id="hatch" disabled>Hatch it</button>
-                  <p class="hint">The city is not decoration — the pet reads its real weather and talks about it.</p>
-                </div>
-              </li>
-            </ol>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- Kept for local debugging and compatibility with the current chain
          client, but deliberately absent from the player-facing interface. -->
     <div class="developer-storage" aria-hidden="true">
@@ -1389,6 +1378,26 @@
       <button id="useKey" type="button" tabindex="-1">Use key</button>
     </div>
   </main>
+
+  <dialog class="pet-create-dialog" id="newPetDialog" aria-labelledby="newPetTitle"
+    aria-describedby="newPetWeatherNote">
+    <form class="pet-create-form" id="newPetForm">
+      <div class="pet-create-heading">
+        <h2 id="newPetTitle">Create a new pet</h2>
+        <button class="pet-create-close" id="newPetClose" type="button" aria-label="Close">×</button>
+      </div>
+      <label class="pet-create-field" for="petName">
+        <span>Name</span>
+        <input id="petName" name="name" maxlength="24" autocomplete="off" spellcheck="false" />
+      </label>
+      <label class="pet-create-field" for="petCity">
+        <span>City</span>
+        <input id="petCity" name="city" value="Lisbon" autocomplete="off" spellcheck="false" />
+      </label>
+      <p class="pet-create-note" id="newPetWeatherNote">The weather in the selected city affects your pet’s mood</p>
+      <button class="press pet-create-submit" id="hatch" type="submit" disabled>Create pet</button>
+    </form>
+  </dialog>
 
   <div id="status" class="console">Loading…</div>
 </div>
@@ -1866,7 +1875,7 @@ const $ = (id) => document.getElementById(id);
 // Hash routes keep the app deployable as one static file and, importantly,
 // keep the pet address in the query string. A shared link can therefore open
 // the same contract while the back button still behaves like navigation.
-const ROUTES = new Set(["play", "character", "community", "journal", "new-pet"]);
+const ROUTES = new Set(["play", "character", "community", "journal"]);
 const routeFromHash = () => {
   const candidate = location.hash.slice(1);
   return ROUTES.has(candidate) ? candidate : "play";
@@ -1893,6 +1902,40 @@ function activateRoute(route, { replace = false } = {}) {
   closeAppMenu();
   window.scrollTo({ top: 0, behavior: "auto" });
 }
+
+const newPetDialog = $("newPetDialog");
+let newPetOpener = null;
+
+function openNewPetDialog(opener = null) {
+  if (busy || newPetDialog.open) return;
+  newPetOpener = opener;
+  if (currentRoute !== "play") activateRoute("play");
+  else closeAppMenu();
+  newPetDialog.showModal();
+  requestAnimationFrame(() => $("petName").focus());
+}
+
+function closeNewPetDialog({ restoreFocus = true } = {}) {
+  if (!newPetDialog.open || busy) return;
+  if (!restoreFocus) newPetOpener = null;
+  newPetDialog.close();
+}
+
+$("newPetClose").addEventListener("click", () => closeNewPetDialog());
+newPetDialog.addEventListener("cancel", (event) => {
+  if (busy) event.preventDefault();
+});
+newPetDialog.addEventListener("click", (event) => {
+  if (event.target !== newPetDialog || busy) return;
+  const box = newPetDialog.getBoundingClientRect();
+  const inside = event.clientX >= box.left && event.clientX <= box.right
+    && event.clientY >= box.top && event.clientY <= box.bottom;
+  if (!inside) closeNewPetDialog();
+});
+newPetDialog.addEventListener("close", () => {
+  newPetOpener?.focus();
+  newPetOpener = null;
+});
 
 $("menuToggle").addEventListener("click", () => {
   const opening = $("appMenu").hidden;
@@ -2441,6 +2484,9 @@ function setBusy(b) {
   $("connect").disabled = b;
   $("connectWallet").disabled = b;
   $("hatch").disabled = b || !signerAddress;
+  $("petName").disabled = b;
+  $("petCity").disabled = b;
+  $("newPetClose").disabled = b;
   $("useKey").disabled = b;
   // ...and nothing to take is a button that should not be pressable. The amount
   // field kept its 0.1 default whatever the reserve said, so an owner of a fed
@@ -2534,13 +2580,6 @@ async function useSigner(mode, addr, { silent = false, switched = false } = {}) 
   signerMode = mode; signerAddress = addr;
   rebuildClient();
   const funds = await walletBalance();
-  const where = mode === "wallet" ? "Your wallet" : "A burner key";
-  $("walletMeta").innerHTML = `${where} is signing as <b>${escapeHtml(short(addr))}</b>`
-    + (funds === null ? "." : ` · <b>${fmtGen(funds)} GEN</b>.`)
-    + (funds === 0n
-      ? ` Empty — <a href="${FAUCET}" target="_blank" rel="noopener">take some testnet GEN</a>`
-        + " before pressing anything, every action costs gas."
-      : "");
   if (!silent) {
     setStatus(funds === 0n
       ? `Connected as ${addr}.\nBalance 0 GEN — reading works, but nothing can be sent yet.\n`
@@ -2563,7 +2602,6 @@ function watchWallet(provider) {
     if (!accounts?.length) {
       signerMode = null; signerAddress = null; rebuildClient();
       myPets = []; renderPetRail();
-      $("walletMeta").textContent = "The wallet disconnected. Reconnect to play.";
       setStatus("The wallet disconnected.", "warn"); paintSteps(); return;
     }
     await useSigner("wallet", accounts[0], { switched: true });
@@ -2646,7 +2684,8 @@ function petArtifact() {
   return artifactPromise;
 }
 
-$("hatch").onclick = async () => {
+$("newPetForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
   const name = $("petName").value.trim();
   const city = $("petCity").value.trim() || "Lisbon";
   if (!signerAddress) { setStatus("Connect a wallet first — hatching is a transaction.", "err"); return; }
@@ -2695,6 +2734,8 @@ $("hatch").onclick = async () => {
 
     $("petName").value = "";
     rememberPet(born, name);      // onto the shelf before the first state read
+    newPetOpener = null;
+    if (newPetDialog.open) newPetDialog.close();
     await openPet(born);
     setStatus(`${name} is alive.\n${born}\nIt is yours — the contract recorded you as its owner.`, "ok");
     ui.message = "hello"; ui.view = "home";
@@ -2707,7 +2748,7 @@ $("hatch").onclick = async () => {
     ui.view = prevView === "busy" ? "home" : prevView;
     if (!dismissed) beep(180, 160);
   } finally { ui.progress = ""; setBusy(false); }
-};
+});
 
 // ── which pet the page is looking at ──────────────────────────────────────
 
@@ -2956,7 +2997,7 @@ async function refreshMyPets({ autoOpen = false, switched = false } = {}) {
       stopAutoRefresh();
       address = ""; LS.a = ""; $("addr").value = "";
       renderPetRail();
-      activateRoute("new-pet");
+      activateRoute("play");
       setStatus("This wallet has no pets yet — name one and hatch it.", "ok");
       paintSteps();
     }
@@ -2965,7 +3006,7 @@ async function refreshMyPets({ autoOpen = false, switched = false } = {}) {
 
 function renderPetRail() {
   const rail = $("petRail");
-  if (!signerAddress || !myPets.length) { rail.hidden = true; return; }
+  if (!signerAddress) { rail.hidden = true; return; }
   const me = signerAddress.toLowerCase();
   const hidden = hiddenSetFor(me);
   const cur = (address || "").toLowerCase();
@@ -3004,7 +3045,7 @@ $("petRail").addEventListener("click", async (e) => {
   if (chip.hasAttribute("data-hide")) { setHidden(me, chip.dataset.hide, true); renderPetRail(); return; }
   if (chip.hasAttribute("data-restore")) { setHidden(me, chip.dataset.restore, false); renderPetRail(); return; }
   if (chip.hasAttribute("data-toggle-hidden")) { showHidden = !showHidden; renderPetRail(); return; }
-  if (chip.hasAttribute("data-new-pet")) { activateRoute("new-pet"); return; }
+  if (chip.hasAttribute("data-new-pet")) { openNewPetDialog(chip); return; }
   const addr = chip.dataset.pet;
   if (!addr || addr.toLowerCase() === (address || "").toLowerCase()) return;
   activateRoute("play");
@@ -3020,7 +3061,6 @@ $("net").onchange = async () => {
   // A different chain means a different everything: the signer may not be on it,
   // and the pet address certainly does not exist there. Drop back to reading.
   signerMode = null; signerAddress = null; account = null; walletProvider = null;
-  $("walletMeta").textContent = "Your wallet signs each action. It is never asked for a key.";
   rebuildClient();
   paintSteps();
   if (address) await loadState();
@@ -3039,20 +3079,15 @@ async function copyShareLink() {
 $("share").onclick = copyShareLink;
 $("shareFeed").onclick = copyShareLink;
 
-/** Reflect the two steps in the paper, so what is left to do is never a guess. */
+/** Reflect wallet and transaction state in the always-visible controls. */
 function paintSteps() {
-  $("stepWallet").classList.toggle("done", !!signerAddress);
-  $("stepPet").classList.toggle("done", !!address);
   $("connectWallet").textContent = signerAddress ? short(signerAddress) : "Connect wallet";
   $("connectWallet").classList.toggle("connected", !!signerAddress);
   $("connectWallet").setAttribute("aria-label", signerAddress
     ? `Connected wallet ${signerAddress}. Choose a different wallet`
     : "Connect wallet");
-  $("hatch").textContent = address ? "Hatch another" : "Hatch it";
+  $("hatch").textContent = "Create pet";
   $("hatch").disabled = busy || !signerAddress;
-  $("petMeta").textContent = address
-    ? "You are looking at " + short(address) + ". Hatching again gives you a second pet."
-    : "Yours alone: a contract of its own, deployed by you, that nobody else can take away.";
 }
 
 $("withdraw").onclick = async () => {

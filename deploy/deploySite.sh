@@ -3,16 +3,20 @@
 #
 # Run from the repo root on the laptop, not on the server: unlike the other
 # projects on that box there is no checkout there and nothing to build there.
-# The site is two files, so a push over rsync IS the deploy.
+# The site is a handful of static files, so a push over rsync IS the deploy.
 #
 #   1. Build frontend/ai_pet.py from contracts/ai_pet.py. It is gitignored and
 #      generated on purpose — a committed copy is how a stale contract ends up
 #      shipping beside a newer page. Same ~52 KB Bradbury ceiling check the
 #      Pages workflow does, for the same reason: over it, deploys fail at gas
 #      estimation, and the player only finds out after paying.
-#   2. Refuse a relative <script src>/<link href>. Harmless at a domain root,
-#      fatal under a path prefix — kept here so both publishing paths agree.
-#   3. rsync the two files to /srv/youraipet/web.
+#   2. Refuse a relative <script src>/<link href> outside assets/. The redesign
+#      ships images under frontend/assets/ and refers to them relatively, which
+#      works at the domain root here and under the Pages path prefix alike —
+#      but only because assets/ travels WITH the page, which step 3 and a
+#      matching existence check below guarantee. Anything else relative is
+#      still a typo waiting to 404.
+#   3. rsync index.html, ai_pet.py and assets/ to /srv/youraipet/web.
 #   4. Sync deploy/youraipet.caddy into /etc/caddy/sites.d/ if it drifted, then
 #      `caddy validate` the WHOLE config before reloading. That box serves four
 #      other projects; a reload on a broken config would take them all down.
@@ -41,16 +45,24 @@ if [ "$bytes" -gt 53248 ]; then
 fi
 
 echo "==> checking the page is self-contained"
-if grep -nE '<(script|link)[^>]+(src|href)="[^"h#/]' frontend/index.html; then
-	echo "!!! relative asset reference" >&2
+if grep -nE '<(script|link)[^>]+(src|href)="[^"h#/]' frontend/index.html | grep -v '"assets/'; then
+	echo "!!! relative asset reference outside assets/" >&2
 	exit 1
 fi
+# Every assets/ path the page mentions — in markup or CSS url() — must exist
+# locally, or step 3 ships a page that 404s on its own artwork.
+for ref in $(grep -oE 'assets/[A-Za-z0-9._-]+' frontend/index.html | sort -u); do
+	if [ ! -f "frontend/$ref" ]; then
+		echo "!!! page references frontend/$ref which does not exist" >&2
+		exit 1
+	fi
+done
 
 echo "==> uploading"
 ssh "$HOST" "mkdir -p $ROOT"
 # No --chmod: macOS ships openrsync, which does not have it. -a preserves the
 # local 644, which is what the caddy user needs to read them anyway.
-rsync -az --delete frontend/index.html frontend/ai_pet.py "$HOST:$ROOT/"
+rsync -az --delete frontend/index.html frontend/ai_pet.py frontend/assets "$HOST:$ROOT/"
 # -a preserves the sender's uid, and the laptop's 501 is nobody on that box.
 # Harmless — 644 is world-readable and caddy only needs to read — but a file
 # owned by a uid with no passwd entry is the kind of thing that reads as a
@@ -73,5 +85,13 @@ echo "    $SITE/ -> $code"
 echo "    $SITE/ai_pet.py -> $type"
 [ "$code" = "200" ] || { echo "!!! page did not answer 200" >&2; exit 1; }
 case "$type" in text/plain*) ;; *) echo "!!! contract is not served as text/plain" >&2; exit 1 ;; esac
+# One representative asset, end to end — proves the assets/ directory actually
+# made it, not just that rsync exited 0.
+asset=$(grep -oE 'assets/[A-Za-z0-9._-]+' frontend/index.html | head -1)
+if [ -n "$asset" ]; then
+	acode=$(curl -s -o /dev/null -w '%{http_code}' "$SITE/$asset")
+	echo "    $SITE/$asset -> $acode"
+	[ "$acode" = "200" ] || { echo "!!! asset did not answer 200" >&2; exit 1; }
+fi
 
 echo "==> done"
