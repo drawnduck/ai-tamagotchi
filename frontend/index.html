@@ -669,16 +669,19 @@
                      box-shadow: 0 1px 0 rgba(255,255,255,.7); }
   .feed li:first-child { color: var(--ink); }
 
-  /* ── the character sheet ─────────────────────────────────────────────────
-     Six counters the pet grew into. The two highest are the ones the contract
-     writes into its prompt, so they are the only ones dressed in copper — the
-     colour means "this is what it sounds like", not "this one is bigger". */
-  .voice { margin: 0 0 15px; font-size: 16px; line-height: 1.4; color: var(--ink); }
+  /* ── personality: the result first, the machinery left off-screen ────── */
+  .personality-grid { width: min(680px, 100%); margin: 0 auto; }
+  .personality-body { padding-block: 42px; }
+  .voice { margin: 0 0 22px; font-size: 20px; line-height: 1.4; color: var(--ink); }
   .voice b { font-weight: 400; color: #7a4116; border-bottom: 1px solid rgba(122,65,22,.35); }
+  .voice .voice-effect {
+    display: block; margin-top: 6px; font-family: var(--mono); font-size: 8px;
+    letter-spacing: .07em; color: var(--ink-faint);
+  }
 
   .traits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
   .trait {
-    display: grid; grid-template-columns: minmax(88px, auto) 1fr minmax(66px, auto);
+    display: grid; grid-template-columns: minmax(92px, auto) 1fr;
     align-items: center; gap: 12px;
     padding: 8px 14px; border-radius: 999px; cursor: pointer;
     background: var(--chrome-pill);
@@ -707,48 +710,33 @@
     box-shadow: inset 0 1px 0 rgba(255,255,255,.65), 0 0 7px rgba(163,230,104,.45),
                 0 1px 0 rgba(255,255,255,.5);
   }
-  .trait__depth {
-    font-family: var(--serif); font-size: 13px; color: var(--ink-faint); text-align: right;
-  }
-  /* A word like "affectionate" eats the row on a phone and leaves the bar a
-     stub. Below this width the bar gets a line of its own. */
+  /* On a phone the name gets its own line so the five cells stay readable. */
   @media (max-width: 620px) {
     .trait {
-      grid-template-columns: 1fr auto; row-gap: 9px; border-radius: 20px; padding: 11px 16px;
-      grid-template-areas: "name depth" "bar bar";
+      grid-template-columns: 1fr; row-gap: 9px; border-radius: 20px; padding: 11px 16px;
     }
-    .trait__name  { grid-area: name; }
-    .trait__depth { grid-area: depth; }
-    .trait__bar   { grid-area: bar; }
   }
   .trait.lead {
     background: linear-gradient(178deg,
       #ffe3c6 0%, #dfa475 15%, #b47645 46%, #8d5327 47%, #c08355 76%, #f0cba6 94%, #c28f60 100%);
   }
   .trait.lead .trait__name { color: #2e1006; text-shadow: 0 1px 0 rgba(255,226,200,.45); }
-  .trait.lead .trait__depth { color: #4a1f07; }
   .trait.lead .trait__bar i.on {
     background: linear-gradient(180deg, #fff0dc 0%, #ffc98d 45%, #8a4d1c 100%);
     box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 0 7px rgba(255,201,141,.5);
   }
 
-  /* the card reads as a readout, because everything the chain says on this
-     page is shown in a well cut into the metal */
   .traitcard {
-    margin-top: 13px; padding: 15px 17px; border-radius: 14px;
+    margin-top: 13px; padding: 13px 16px; border-radius: 14px;
     background: var(--well); color: #86b95d;
-    font-family: var(--mono); font-size: 12.5px; line-height: 1.6;
+    font-family: var(--mono); font-size: 11px; line-height: 1.55;
     box-shadow: inset 0 2px 7px rgba(0,0,0,.95), inset 0 0 0 1px rgba(255,255,255,.06),
                 0 1px 0 rgba(255,255,255,.55);
   }
-  .traitcard h3 {
-    margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: .2em;
-    text-transform: uppercase; color: #d8ff9f;
+  .traitcard p { margin: 0; }
+  .personality-settings-trigger {
+    width: auto; margin-top: 16px; padding: 9px 14px; font-size: 8px;
   }
-  .traitcard p { margin: 0 0 9px; }
-  .traitcard p:last-child { margin-bottom: 0; }
-  .traitcard b { font-weight: 400; color: var(--phos); }
-  .traitcard .lead-note { color: #ffc861; }
 
   /* ── actions parked at the end of a board row ────────────────────────── */
   #directory li { grid-template-columns: 20px 1fr auto auto; }
@@ -891,6 +879,7 @@
     border-top: 1px solid rgba(28,29,31,.14);
   }
   .menu-utilities .press { min-width: 0; padding: 8px 6px; font-size: 7.5px; }
+  .menu-utilities .menu-funds { grid-column: 1 / -1; }
 
   .wallet-mini {
     position: relative; grid-column: 3; justify-self: end; pointer-events: auto;
@@ -1033,6 +1022,22 @@
     letter-spacing: .035em; color: var(--ink-faint);
   }
   .pet-create-submit { padding-block: 10px; font-size: 8px; }
+  .utility-dialog__note,
+  .utility-dialog__confirm {
+    margin: 0; font-family: var(--mono); font-size: 8px; line-height: 1.5;
+    letter-spacing: .035em; color: var(--ink-faint);
+  }
+  .utility-dialog__confirm { min-height: 12px; color: #77351d; }
+  .utility-dialog__action { padding-block: 10px; font-size: 8px; }
+  .utility-dialog__danger.confirming {
+    color: #fff1ea; text-shadow: none;
+    background: linear-gradient(180deg, #a44b2d, #6d2415);
+  }
+  .utility-kv {
+    display: flex; justify-content: space-between; gap: 16px; padding: 2px 1px;
+    font-family: var(--mono); font-size: 8px; color: var(--ink-faint);
+  }
+  .utility-kv b { font-weight: 700; color: var(--ink-dim); }
 
   #status.console {
     position: fixed; z-index: 75; left: 50%; bottom: 18px; width: max-content;
@@ -1208,13 +1213,14 @@
         <p class="menu-popover__label">Where to?</p>
         <nav class="app-nav" aria-label="Main navigation">
           <button type="button" data-route="play"><span class="nav-index">01</span><span>Play</span></button>
-          <button type="button" data-route="character"><span class="nav-index">02</span><span>Character</span></button>
+          <button type="button" data-route="character"><span class="nav-index">02</span><span>Personality</span></button>
           <button type="button" data-route="community"><span class="nav-index">03</span><span>Community</span></button>
           <button type="button" data-route="journal"><span class="nav-index">04</span><span>Journal</span></button>
         </nav>
         <div class="menu-utilities">
           <button class="press" id="refresh" type="button" disabled>Refresh</button>
           <button class="press" id="share" type="button" disabled>Copy link</button>
+          <button class="press menu-funds" id="petFundsMenu" type="button" hidden>Pet funds</button>
         </div>
       </div>
     </div>
@@ -1281,44 +1287,18 @@
 
     <section class="app-page content-page" data-page="character" hidden>
       <div class="page-intro">
-        <div><p class="page-intro__eyebrow">What living changed</p><h2>Character</h2></div>
-        <p>The traits that have grown from what this pet has actually experienced — and the voice they produce.</p>
+        <div><h2>Personality</h2></div>
+        <p>Your pet’s personality changes based on what happens to it.</p>
       </div>
-      <div class="page-grid two">
+      <div class="page-grid personality-grid">
         <div class="slip" data-frame="panel" id="charBox" hidden>
-          <div class="slip__body">
-            <h2><svg class="sigil"><use href="#sig" /></svg> Character <em>what living added</em></h2>
-            <div class="hr"></div>
+          <div class="slip__body personality-body">
             <p class="voice" id="charVoice"></p>
             <ul class="traits" id="traits"></ul>
             <div class="traitcard" id="traitCard" hidden></div>
             <p class="hint" id="charHint"></p>
-            <div class="row" id="charControls" hidden style="margin-top:14px">
-              <button class="press" id="freeze">Freeze</button>
-              <button class="press" id="forget">Reset</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="slip" data-frame="panel" id="ownerBox" hidden>
-          <div class="slip__body">
-            <h2><svg class="sigil"><use href="#sig" /></svg> Owner <em>the food money</em></h2>
-            <div class="hr"></div>
-            <div class="kv"><span>held by the contract</span><b id="balMeta">— GEN</b></div>
-            <div class="kv"><span>yours to take</span><b id="wdMeta">— GEN</b></div>
-            <label class="stack" for="wdAmt">Withdraw</label>
-            <div class="row">
-              <div class="field"><input id="wdAmt" type="number" min="0" step="0.01" value="0.1" /></div>
-              <button class="press slim" id="withdraw">Take it</button>
-            </div>
-            <!-- Filled by loadState and shown only when the two numbers above
-                 disagree. A "yours to take" of zero next to a balance that is
-                 plainly not zero reads as a broken till unless it says why. -->
-            <p class="hint" id="tillNote" hidden></p>
-            <p class="hint">Once the pet has been fed a revive's worth in its life, 1 GEN stays
-              back as the revive reserve; a till-revive locks that GEN away for good, and the
-              till then needs new food before it can cover another death. The payout settles when the transaction
-              <b>finalizes</b> — about half an hour on Bradbury. The balance stays put until then.</p>
+            <button class="press personality-settings-trigger" id="personalitySettings"
+              type="button" hidden>Personality settings</button>
           </div>
         </div>
       </div>
@@ -1397,6 +1377,39 @@
       <p class="pet-create-note" id="newPetWeatherNote">The weather in the selected city affects your pet’s mood</p>
       <button class="press pet-create-submit" id="hatch" type="submit" disabled>Create pet</button>
     </form>
+  </dialog>
+
+  <dialog class="pet-create-dialog utility-dialog" id="personalityDialog"
+    aria-labelledby="personalityDialogTitle">
+    <div class="pet-create-form">
+      <div class="pet-create-heading">
+        <h2 id="personalityDialogTitle">Personality settings</h2>
+        <button class="pet-create-close" id="personalityClose" type="button" aria-label="Close">×</button>
+      </div>
+      <p class="utility-dialog__note" id="personalitySettingsNote">Personality changes are on.</p>
+      <button class="press utility-dialog__action" id="freeze" type="button">Pause changes</button>
+      <button class="press utility-dialog__action utility-dialog__danger" id="forget"
+        type="button">Reset personality</button>
+      <p class="utility-dialog__confirm" id="resetPersonalityNote" aria-live="polite"></p>
+    </div>
+  </dialog>
+
+  <dialog class="pet-create-dialog utility-dialog" id="petFundsDialog" aria-labelledby="petFundsTitle">
+    <div class="pet-create-form">
+      <div class="pet-create-heading">
+        <h2 id="petFundsTitle">Pet funds</h2>
+        <button class="pet-create-close" id="petFundsClose" type="button" aria-label="Close">×</button>
+      </div>
+      <div class="utility-kv"><span>In the pet</span><b id="balMeta">— GEN</b></div>
+      <div class="utility-kv"><span>You can withdraw</span><b id="wdMeta">— GEN</b></div>
+      <label class="pet-create-field" for="wdAmt">
+        <span>Amount</span>
+        <input id="wdAmt" type="number" min="0" step="0.01" value="0.1" />
+      </label>
+      <button class="press utility-dialog__action" id="withdraw" type="button">Withdraw</button>
+      <p class="utility-dialog__note" id="tillNote" hidden></p>
+      <p class="utility-dialog__note">1 GEN may be kept to revive your pet.</p>
+    </div>
   </dialog>
 
   <div id="status" class="console">Loading…</div>
@@ -2093,6 +2106,52 @@ newPetDialog.addEventListener("close", () => {
   newPetOpener = null;
 });
 
+const personalityDialog = $("personalityDialog");
+const petFundsDialog = $("petFundsDialog");
+const utilityDialogOpeners = new Map();
+
+function openUtilityDialog(dialog, opener, focusTarget) {
+  if (busy || dialog.open || document.querySelector("dialog[open]")) return;
+  closeAppMenu();
+  utilityDialogOpeners.set(dialog, opener);
+  dialog.showModal();
+  requestAnimationFrame(() => focusTarget?.focus());
+}
+
+function closeUtilityDialog(dialog) {
+  if (!dialog.open || busy) return;
+  dialog.close();
+}
+
+function wireUtilityDialog(dialog, closeButton) {
+  closeButton.addEventListener("click", () => closeUtilityDialog(dialog));
+  dialog.addEventListener("cancel", (event) => {
+    if (busy) event.preventDefault();
+  });
+  dialog.addEventListener("click", (event) => {
+    if (event.target !== dialog || busy) return;
+    const box = dialog.getBoundingClientRect();
+    const inside = event.clientX >= box.left && event.clientX <= box.right
+      && event.clientY >= box.top && event.clientY <= box.bottom;
+    if (!inside) closeUtilityDialog(dialog);
+  });
+  dialog.addEventListener("close", () => {
+    utilityDialogOpeners.get(dialog)?.focus();
+    utilityDialogOpeners.delete(dialog);
+    if (dialog === personalityDialog) disarmPersonalityReset();
+  });
+}
+
+wireUtilityDialog(personalityDialog, $("personalityClose"));
+wireUtilityDialog(petFundsDialog, $("petFundsClose"));
+$("personalitySettings").addEventListener("click", (event) => {
+  disarmPersonalityReset();
+  openUtilityDialog(personalityDialog, event.currentTarget, $("freeze"));
+});
+$("petFundsMenu").addEventListener("click", (event) => {
+  openUtilityDialog(petFundsDialog, $("menuToggle"), $("wdAmt"));
+});
+
 $("menuToggle").addEventListener("click", () => {
   const opening = $("appMenu").hidden;
   $("appMenu").hidden = !opening;
@@ -2652,7 +2711,10 @@ function setBusy(b) {
   $("withdraw").disabled = b || !client || !isOwner || withdrawable === 0n;
   $("freeze").disabled = b || !client || !isOwner;
   $("forget").disabled = b || !client || !isOwner;
-  $("charControls").hidden = !isOwner;
+  $("personalitySettings").disabled = b || !client || !isOwner;
+  $("petFundsMenu").disabled = b || !client || !isOwner;
+  $("personalityClose").disabled = b;
+  $("petFundsClose").disabled = b;
   if (dead && ui.view !== "busy" && ui.view !== "confirm") ui.view = "home";
 }
 
@@ -2731,8 +2793,17 @@ async function ensureWalletOnChain(provider, chain) {
   }
 }
 
+function hideOwnerTools() {
+  isOwner = false;
+  $("petFundsMenu").hidden = true;
+  $("personalitySettings").hidden = true;
+  if (personalityDialog.open) personalityDialog.close();
+  if (petFundsDialog.open) petFundsDialog.close();
+}
+
 /** Adopt a signer and say so, including the balance. */
 async function useSigner(mode, addr, { silent = false, switched = false } = {}) {
+  hideOwnerTools();
   signerMode = mode; signerAddress = addr;
   rebuildClient();
   const funds = await walletBalance();
@@ -2757,6 +2828,7 @@ function watchWallet(provider) {
   provider.on("accountsChanged", async (accounts) => {
     if (!accounts?.length) {
       signerMode = null; signerAddress = null; rebuildClient();
+      hideOwnerTools();
       myPets = []; renderPetRail();
       setStatus("The wallet disconnected.", "warn"); paintSteps(); return;
     }
@@ -3217,6 +3289,7 @@ $("net").onchange = async () => {
   // A different chain means a different everything: the signer may not be on it,
   // and the pet address certainly does not exist there. Drop back to reading.
   signerMode = null; signerAddress = null; account = null; walletProvider = null;
+  hideOwnerTools();
   rebuildClient();
   paintSteps();
   if (address) await loadState();
@@ -3256,10 +3329,34 @@ $("withdraw").onclick = async () => {
     + "about half an hour on Bradbury. The contract balance stays put until then.", "ok");
 };
 
-$("freeze").onclick = () => doAction("set_evolution", {
-  args: [!evolvingNow], label: evolvingNow ? "freeze" : "unfreeze",
-});
-$("forget").onclick = () => doAction("reset_character", { label: "reset" });
+let personalityResetArmed = false;
+function disarmPersonalityReset() {
+  personalityResetArmed = false;
+  $("forget").textContent = "Reset personality";
+  $("forget").classList.remove("confirming");
+  $("resetPersonalityNote").textContent = "";
+}
+
+$("freeze").onclick = async () => {
+  disarmPersonalityReset();
+  const ok = await doAction("set_evolution", {
+    args: [!evolvingNow], label: evolvingNow ? "pause personality changes" : "resume personality changes",
+  });
+  if (ok) closeUtilityDialog(personalityDialog);
+};
+
+$("forget").onclick = async () => {
+  if (!personalityResetArmed) {
+    personalityResetArmed = true;
+    $("forget").textContent = "Confirm reset";
+    $("forget").classList.add("confirming");
+    $("resetPersonalityNote").textContent = "This removes every personality trait your pet has learned.";
+    return;
+  }
+  const ok = await doAction("reset_character", { label: "reset personality" });
+  disarmPersonalityReset();
+  if (ok) closeUtilityDialog(personalityDialog);
+};
 
 /** The signer's GEN, or null if there is no signer or it cannot be read. */
 async function walletBalance() {
@@ -3497,8 +3594,8 @@ async function loadState(opts = {}) {
     if (isOwner) rememberPet(address, s.name);
 
     $("modelTag").textContent = timeScale > 1 ? `GEN-${timeScale}×` : "GEN-001";
-    $("ownerBox").hidden = !isOwner;
-    $("charControls").hidden = !isOwner;
+    $("petFundsMenu").hidden = !isOwner;
+    $("personalitySettings").hidden = !isOwner;
     $("balMeta").textContent = fromWei(bal).toFixed(3) + " GEN";
     $("wdMeta").textContent = fromWei(withdrawable).toFixed(3) + " GEN";
     // `max` is advisory for a scripted read — the click handler reads .value —
@@ -3512,18 +3609,14 @@ async function loadState(opts = {}) {
     let note = "";
     if (held > 0n && withdrawable === 0n) {
       note = effective === 0n
-        ? "Every GEN here has already gone on a revive. It is locked for good."
+        ? "This balance was already used to revive your pet."
         : effective < reviveCost
-          ? "Less than the 1 GEN reserve. This dust is stuck on purpose until someone "
-            + "feeds the pet again — it is not a broken till."
-          : "Held back as the 1 GEN revive reserve — kept for the next death, not lost.";
-    }
-    if (note && burned > 0n) {
-      note += ` (${fromWei(burned).toFixed(2)} GEN of the balance was already spent reviving it.)`;
+          ? "This small amount stays with your pet until it receives more food."
+          : "1 GEN is reserved to revive your pet.";
     }
     $("tillNote").textContent = note;
     $("tillNote").hidden = !note;
-    $("freeze").textContent = evolvingNow ? "Freeze" : "Unfreeze";
+    $("freeze").textContent = evolvingNow ? "Pause changes" : "Resume changes";
 
     renderCharacter(char);
 
@@ -3559,47 +3652,19 @@ async function loadState(opts = {}) {
   }
 }
 
-// The character sheet. Levels come from the contract, and so does max_level, so
-// the dots can never disagree with the ceiling the contract actually enforces.
-// ── the character sheet ───────────────────────────────────────────────────
-//
-// This is the most interesting thing the contract does and it used to be six
-// grey pills. What matters, and what the panel now says out loud:
-//
-//   · the model picks which trait an event moved — from a CLOSED list the
-//     contract owns, so a pet can never talk itself into a new personality;
-//   · the two highest traits are written into the prompt, which is why the
-//     character is not decoration: it changes what the pet says next;
-//   · a nudge lands at most once per cooldown, so this moves slowly on purpose.
-//
-// The per-trait notes are written as tendencies, not rules, because there is no
-// rule in the contract to quote: nothing maps "play" to "playful". The model
-// decides, and claiming otherwise would be inventing mechanics.
-const TRAIT_NOTE = {
-  curious:      "Leans toward a pet that keeps looking outward. Tends to move when it checks the world — the weather in its city, the day's market — and finds something in it.",
-  affectionate: "The warm one. Tends to move when someone turns up and is kind to it: petting, feeding, a visitor at the door.",
-  playful:      "Tends to move after play, and after outings that went well.",
-  wary:         "Tends to move when things go badly — long stretches with no one there, running low on food, a stranger it did not warm to.",
-  gloomy:       "Tends to move when it is left alone or the world it reads about is grim.",
-  proud:        "Tends to move when it is well kept: a full belly, a good mood, someone who visits.",
+// Contract keys stay intact; only the player-facing words are simplified.
+const TRAIT_COPY = {
+  curious:      { label: "Curious",  note: "Likes discovering new things." },
+  affectionate: { label: "Loving",   note: "Grows when the pet receives care." },
+  playful:      { label: "Playful",  note: "Grows through games and happy visits." },
+  wary:         { label: "Cautious", note: "Appears after difficult experiences." },
+  gloomy:       { label: "Gloomy",   note: "Grows when the pet feels lonely." },
+  proud:        { label: "Proud",    note: "Grows when the pet is healthy and well cared for." },
 };
-const DEPTH_WORD = ["", "a little", "a little", "noticeably", "noticeably", "deeply"];
-// The six traits are three opposing pairs, and a nudge toward one of a pair
-// spends itself LOWERING the other while the other is above zero — which is why
-// a trait can sit still through several nudges and why a pair never both stand.
-// Hardcoded so a pet deployed before get_character() published `opposites` still
-// explains itself; the contract's own list wins whenever it is there, so a
-// redeploy that changes the pairs does not leave this page quietly disagreeing.
-const TRAIT_OPPOSITES = [["curious", "wary"], ["playful", "gloomy"], ["affectionate", "proud"]];
-function oppositeOf(c, name) {
-  const pairs = Array.isArray(c?.opposites) ? c.opposites : TRAIT_OPPOSITES;
-  for (const pair of pairs) {
-    const a = String(pair?.[0] ?? ""), b = String(pair?.[1] ?? "");
-    if (a === name) return b;
-    if (b === name) return a;
-  }
-  return "";
-}
+const traitCopy = (name) => TRAIT_COPY[name] || {
+  label: name.charAt(0).toUpperCase() + name.slice(1),
+  note: "Part of this pet’s personality.",
+};
 
 let openTrait = null;
 
@@ -3609,8 +3674,6 @@ function renderCharacter(c) {
   if (!traits.length) return;
   const max = Number(c.max_level) || 5;
 
-  // The lead pair, chosen the way the contract chooses it: level first, ties
-  // broken by position, and only traits above zero count.
   const lead = traits
     .map((t, i) => ({ name: String(t.name), level: Number(t.level) || 0, i }))
     .filter(t => t.level > 0)
@@ -3618,77 +3681,43 @@ function renderCharacter(c) {
     .slice(0, 2);
   const isLead = (name) => lead.some(t => t.name === name);
 
+  const petName = escapeHtml(pet?.name || "Your pet");
   $("charVoice").innerHTML = lead.length
-    ? "Right now it speaks as something "
-      + lead.map(t => `<b>${escapeHtml(DEPTH_WORD[Math.min(t.level, 5)])} `
-                     + `${escapeHtml(t.name)}</b>`).join(" and ")
-      + (lead.length > 1 ? " — those go into its prompt, and nothing else here does."
-                         : " — that goes into its prompt, and nothing else here does.")
-    : "A blank slate. Nothing it has lived through has moved it yet.";
+    ? `${petName} is currently `
+      + lead.map(t => `<b>${escapeHtml(traitCopy(t.name).label.toLowerCase())}</b>`).join(" and ")
+      + `. <span class="voice-effect">This shapes how it talks.</span>`
+    : `${petName} is still finding its personality.`
+      + `<span class="voice-effect">It will change through new experiences.</span>`;
 
   $("traits").innerHTML = traits.map(t => {
     const name = String(t.name), level = Number(t.level) || 0;
     const cells = Array.from({ length: max },
       (_, i) => `<i class="${i < level ? "on" : ""}"></i>`).join("");
     return `<li class="trait${isLead(name) ? " lead" : ""}" data-trait="${escapeHtml(name)}"`
-      + ` tabindex="0" role="button" aria-expanded="${openTrait === name}">`
-      + `<span class="trait__name">${escapeHtml(name)}</span>`
+      + ` tabindex="0" role="button" aria-expanded="${openTrait === name}"`
+      + ` aria-label="${escapeHtml(traitCopy(name).label)} ${level} of ${max}">`
+      + `<span class="trait__name">${escapeHtml(traitCopy(name).label)}</span>`
       + `<span class="trait__bar">${cells}</span>`
-      + `<span class="trait__depth">${escapeHtml(level ? DEPTH_WORD[Math.min(level, 5)] : "—")}</span>`
       + `</li>`;
   }).join("");
 
   $("charHint").textContent = c.evolving
-    ? `Tap a trait to see what moves it. One nudge at a time, at most once per `
-      + `${Number(c.cooldown_hours)} in-pet hours — ${Number(c.evolutions) || 0} so far in this life.`
-    : "The owner has frozen this character — experience no longer changes it.";
+    ? "Personality changes slowly over time. Tap a trait to learn more."
+    : "Personality changes are paused.";
+  $("personalitySettingsNote").textContent = c.evolving
+    ? "Personality changes are on."
+    : "Personality changes are paused.";
 
-  drawTraitCard(c, max, isLead);
+  drawTraitCard(c);
 }
 
-function drawTraitCard(c, max, isLead) {
+function drawTraitCard(c) {
   const box = $("traitCard");
   const t = (c.traits || []).find(x => String(x.name) === openTrait);
   if (!t) { box.hidden = true; box.innerHTML = ""; return; }
-  const name = String(t.name), level = Number(t.level) || 0;
-
-  // Cooldown is stated in the pet's own hours; a fast-clock pet burns through
-  // them faster, so it is converted before it is shown.
-  const realSecs = (Number(c.cooldown_hours) || 0) * 3600 / Math.max(1, timeScale);
-  const since = Number(c.last_evolved_ts)
-    ? Math.floor(Date.now() / 1000) - Number(c.last_evolved_ts) : Infinity;
-  const left = Math.ceil((realSecs - since) / 60);
-  const when = !c.evolving ? "frozen by the owner — nothing moves until it is unfrozen"
-    : since === Infinity || left <= 0 ? "ready — the next thing it says could move a trait"
-    : `about ${left} min before anything can move again`;
-
+  const copy = traitCopy(String(t.name));
   box.hidden = false;
-  box.innerHTML =
-    `<h3>${escapeHtml(name)} · ${level} of ${max}</h3>`
-    + `<p>${escapeHtml(TRAIT_NOTE[name] || "One of the six words the model may pick from.")}</p>`
-    + (isLead(name)
-        ? `<p class="lead-note">One of the two the contract writes into its prompt — `
-          + `this word is shaping what it says.</p>`
-        : level > 0
-          ? `<p>Not in its voice yet: only the top two reach the prompt.</p>`
-          : `<p>Never moved.</p>`)
-    + oppositeNote(c, name)
-    + `<p><b>${escapeHtml(when)}</b></p>`;
-}
-
-/** Why a nudge toward this trait might lower a different one instead. */
-function oppositeNote(c, name) {
-  const opp = oppositeOf(c, name);
-  if (!opp) return "";
-  const row = (c.traits || []).find(x => String(x.name) === opp);
-  const level = Number(row?.level) || 0;
-  const o = escapeHtml(opp), n = escapeHtml(name);
-  return level > 0
-    ? `<p>Opposite: <b>${o}</b>, standing at ${level}. A nudge toward ${n} spends `
-      + `itself taking ${o} down a point instead — crossing zero costs two nudges, `
-      + `and the pair can never both stand.</p>`
-    : `<p>Opposite: <b>${o}</b>, at zero — so a nudge toward ${n} raises ${n}. `
-      + `Once ${o} moves, nudges toward ${n} go on lowering it until it is spent.</p>`;
+  box.innerHTML = `<p>${escapeHtml(copy.note)}</p>`;
 }
 
 // One listener on the list, so re-rendering the rows never leaks handlers.
