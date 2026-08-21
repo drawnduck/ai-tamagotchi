@@ -401,6 +401,12 @@
     animation: screen-working 1.15s ease-in-out infinite;
   }
   .render-device[data-alive="false"] .render-screen { filter: saturate(.35) brightness(.8); }
+  /* No pet chosen yet: the glass goes dark and stops glowing, the way a toy
+     with no cartridge looks — visibly waiting, not broken. */
+  .render-device[data-view="off"] .render-screen {
+    filter: saturate(.4) brightness(.55);
+    box-shadow: inset 0 0 0 1px rgba(20,24,12,.3), 0 0 8px rgba(198,209,116,.05);
+  }
   @keyframes screen-working {
     0%, 100% { box-shadow: inset 0 0 0 1px rgba(20,24,12,.24), 0 0 15px rgba(198,209,116,.1); }
     50%      { box-shadow: inset 0 0 0 1px rgba(20,24,12,.32), 0 0 27px rgba(198,209,116,.44); }
@@ -2242,11 +2248,15 @@ deviceShell.addEventListener("pointerleave", () => {
 });
 
 const LS = {
-  get a(){ return localStorage.getItem("aipet_addr") || ""; }, set a(v){ localStorage.setItem("aipet_addr", v); },
   get k(){ return localStorage.getItem("aipet_pk") || ""; },   set k(v){ localStorage.setItem("aipet_pk", v); },
   get n(){ return localStorage.getItem("aipet_net") || "testnetBradbury"; },
   set n(v){ localStorage.setItem("aipet_net", v); },
 };
+// The last-opened pet used to be remembered here and silently reopened on the
+// next visit — even after the player deleted ?pet= from the URL, which read as
+// the page refusing to let go. A pet is on screen only because THIS visit chose
+// it: a link, the shelf, or a hatch. Purge the old key so nothing resurrects it.
+try { localStorage.removeItem("aipet_addr"); } catch {}
 
 let client = null, account = null, address = null;
 
@@ -2278,7 +2288,7 @@ const fromWei = (w) => Number(BigInt(w || "0")) / 1e18;
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g,
   c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 
-$("addr").value = LS.a; $("pk").value = LS.k; $("net").value = LS.n;
+$("pk").value = LS.k; $("net").value = LS.n;
 
 // ── how much food a press buys ────────────────────────────────────────────
 //
@@ -2348,13 +2358,16 @@ if (linked.net && $("net").querySelector(`option[value="${CSS.escape(linked.net)
   $("net").value = linked.net;
 }
 
-/** Keep the address bar holding a link worth copying. Called after a connect. */
+/** Keep the address bar holding a link worth copying. Called after a connect.
+ * With no pet open it must also UN-say one: a URL still naming the last pet
+ * would reopen it on reload, which is exactly the ghost this page gave up. */
 function refreshShareLink() {
-  if (!address) return;
-  const q = new URLSearchParams({ pet: address, net: $("net").value });
+  const q = new URLSearchParams();
+  if (address) { q.set("pet", address); q.set("net", $("net").value); }
   const dir = $("factoryAddr").value.trim();
   if (/^0x[0-9a-fA-F]{40}$/.test(dir)) q.set("dir", dir);
-  history.replaceState(null, "", `${location.pathname}?${q}#${currentRoute}`);
+  const qs = q.toString();
+  history.replaceState(null, "", `${location.pathname}${qs ? "?" + qs : ""}#${currentRoute}`);
 }
 
 // ── the menu the device actually offers ───────────────────────────────────
@@ -2411,10 +2424,15 @@ function spriteFor() {
 }
 
 function render() {
-  deviceVisual.dataset.view = ui.view;
-  deviceVisual.dataset.alive = String(alive);
+  // No pet on screen: the device is off. No menu bar, no cursor, no footer —
+  // icons that cannot be pressed would be a lie about what the toy can do.
+  const off = !address;
+  deviceVisual.dataset.view = off ? "off" : ui.view;
+  deviceVisual.dataset.alive = String(off || alive);
   ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = INK;
+
+  if (off) { drawOff(); return; }
 
   drawMenuBar();
 
@@ -2450,6 +2468,12 @@ function drawFooter() {
   const label = ui.progress || ui.message ||
     (client ? (items[ui.cursor]?.label ?? "") : "connect first");
   textCentered(label.slice(0, CHARS_PER_LINE), 63);
+}
+
+function drawOff() {
+  // Dark glass, one instruction, nothing blinking. The choosing happens on the
+  // shelf and the board around the device, so the screen only has to ask.
+  textCentered("choose a pet", 33);
 }
 
 function drawSplash() {
@@ -2616,7 +2640,7 @@ function flash(btn) {
 
 function pressA() {                              // cycle the menu
   flash("btnA"); beep(720, 30);
-  if (!client) return;
+  if (!client || !address) return;               // an off screen has no menu
   // on the feed confirmation A is the portion dial, not the menu
   if (ui.view === "confirm" && ui.pending?.key === "feed") {
     portion = (portion + 1) % PORTIONS.length;
@@ -2672,7 +2696,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); pressA(); }
   else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
     e.preventDefault(); flash("btnA"); beep(720, 30);
-    if (!client) return;
+    if (!client || !address) return;
     const items = menuItems();
     ui.cursor = (ui.cursor - 1 + items.length) % items.length;
     ui.view = "home"; ui.scroll = 0;
@@ -2859,9 +2883,10 @@ async function useSigner(mode, addr, { silent = false, switched = false } = {}) 
       funds === 0n ? "warn" : "ok");
   }
   paintSteps();
-  // Not awaited: the shelf filling in (and a returning player's pet opening)
-  // must never hold the "connected" answer hostage to a directory read.
-  refreshMyPets({ autoOpen: true, switched });
+  // Not awaited: the shelf filling in must never hold the "connected" answer
+  // hostage to a directory read. The shelf only OFFERS pets — it never opens
+  // one by itself; the player asked for that in plain words.
+  refreshMyPets({ switched });
 }
 
 let walletWatched = false;
@@ -2871,10 +2896,15 @@ function watchWallet(provider) {
   walletWatched = true;
   provider.on("accountsChanged", async (accounts) => {
     if (!accounts?.length) {
+      // Disconnecting the wallet ends the sitting: the pet closes too, and the
+      // device goes back to asking for a choice. Leaving the pet on screen
+      // made the next visitor of a shared machine start inside someone else's
+      // game.
       signerMode = null; signerAddress = null; rebuildClient();
-      hideOwnerTools();
-      myPets = []; renderPetRail();
-      setStatus("The wallet disconnected.", "warn"); paintSteps(); return;
+      myPets = [];
+      closePet();
+      setStatus("The wallet disconnected — the device is waiting for a pet to be chosen.", "warn");
+      return;
     }
     await useSigner("wallet", accounts[0], { switched: true });
     if (address) await loadState();
@@ -3031,7 +3061,7 @@ async function openPet(addr, { announce = false } = {}) {
     if (announce) setStatus("That is not a contract address (0x + 40 hex).", "err");
     return;
   }
-  address = addr; LS.a = addr; $("addr").value = addr;
+  address = addr; $("addr").value = addr;
   if (!client) rebuildClient();
   refreshShareLink();
   renderPetRail();               // move the shelf's highlight to this pet
@@ -3039,6 +3069,23 @@ async function openPet(addr, { announce = false } = {}) {
   await loadState();
   loadDirectory({});
   startAutoRefresh();
+  paintSteps();
+}
+
+/** The opposite of openPet: stop looking at anyone. The device goes dark and
+ * asks for a choice; nothing polls, nothing lingers from the last pet. */
+function closePet() {
+  stopAutoRefresh();
+  address = null; $("addr").value = "";
+  pet = null; social = null; character = null;
+  alive = true; reviveCost = null; tillReady = false; withdrawable = 0n;
+  ui.view = "home"; ui.cursor = 0; ui.scroll = 0;
+  ui.pending = null; ui.message = ""; ui.progress = "";
+  hideOwnerTools();
+  $("worldRail").hidden = true;
+  renderPetRail();
+  refreshShareLink();            // and un-say the pet in the address bar
+  setBusy(false);                // re-gates A/B/C, which key off `address`
   paintSteps();
 }
 
@@ -3200,7 +3247,7 @@ async function walletPetsFromChain(me) {
   return pets;
 }
 
-async function refreshMyPets({ autoOpen = false, switched = false } = {}) {
+async function refreshMyPets({ switched = false } = {}) {
   if (!signerAddress) { myPets = []; renderPetRail(); return; }
   const me = signerAddress.toLowerCase();
   const [fromDir, fromChain] = await Promise.all([
@@ -3240,41 +3287,25 @@ async function refreshMyPets({ autoOpen = false, switched = false } = {}) {
     localStorage.setItem("aipet_mine", JSON.stringify(all));
   } catch { /* storage refused — the shelf still works for this session */ }
   renderPetRail();
-  // Auto-opening considers only what is ON the shelf; hidden pets are owned
-  // but resting, and nobody should be greeted with one.
+  // What is ON the shelf, for the message below; hidden pets are owned but
+  // resting. Note what is deliberately absent here: no pet is ever opened just
+  // because a wallet connected. The device stays dark until the player picks
+  // one — from the shelf, a link, or a fresh hatch.
   const hidden = hiddenSetFor(me);
   const visible = myPets.filter(p => !hidden.has(p.address.toLowerCase()));
-  // A returning player should land on their pet, not on a form. Only when the
-  // page is not already pointed anywhere — a shared link always wins.
-  if (autoOpen && !address && !$("addr").value.trim() && visible.length) {
-    const last = visible[visible.length - 1];
-    await openPet(last.address);
-    setStatus(`Welcome back — opened ${last.name} (${short(last.address)}).\n`
-      + (visible.length > 1 ? "The shelf on the right switches between your pets." : ""), "ok");
-    return;
-  }
   // A DIFFERENT signer just took over. If it does not own the pet on screen,
-  // move it into its own game — except when the open pet is exactly what the
-  // page's link pointed at: a visitor who followed a friend's link and then
-  // connected did so to feed THAT pet, not to be led somewhere else.
+  // stop showing it a stranger's pet and hand back the choice — except when
+  // the open pet is exactly what the page's link pointed at: a visitor who
+  // followed a friend's link and then connected did so to feed THAT pet.
   const ownsOpen = !!address && myPets.some(p => p.address.toLowerCase() === address.toLowerCase());
   if (switched && address && !ownsOpen
       && address.toLowerCase() !== linked.pet.toLowerCase()) {
-    if (visible.length) {
-      const last = visible[visible.length - 1];
-      const was = short(address);
-      await openPet(last.address);
-      setStatus(`${was} belongs to another wallet — opened your ${last.name} `
-        + `(${short(last.address)}) instead.`, "ok");
-    } else {
-      stopAutoRefresh();
-      address = ""; LS.a = ""; $("addr").value = "";
-      renderPetRail();
-      $("worldRail").hidden = true;
-      activateRoute("play");
-      setStatus("This wallet has no pets yet — name one and hatch it.", "ok");
-      paintSteps();
-    }
+    const was = short(address);
+    closePet();
+    activateRoute("play");
+    setStatus(visible.length
+      ? `${was} belongs to another wallet — choose one of yours from the shelf.`
+      : "This wallet has no pets yet — name one and hatch it.", "ok");
   }
 }
 
@@ -4150,6 +4181,9 @@ paintSteps();
     } catch { account = null; }
   }
 
+  // Only a link opens a pet at boot. What this browser played last time is
+  // nobody's business today: every visit starts at the dark screen and the
+  // player says which pet they mean.
   const startPet = $("addr").value.trim();
   if (/^0x[0-9a-fA-F]{40}$/.test(startPet)) {
     await openPet(startPet);
@@ -4162,8 +4196,8 @@ paintSteps();
     rebuildClient();
     loadDirectory({});
     setStatus(signerAddress
-      ? "Name a pet and hatch it."
-      : "Two presses: connect a wallet, then hatch a pet.");
+      ? "Choose a pet from the shelf — or name a new one and hatch it."
+      : "Connect a wallet, then choose a pet or hatch one.");
   }
 })();
 </script>
