@@ -915,10 +915,10 @@
   .game-device-column .devicefoot { margin-top: 13px; }
 
   /* A real object, not another chrome pill. It sits like a field manual placed
-     at the lower-right edge, clear of the toy and the bottom status readout. */
+     in the open lower-left corner, clear of the toy and the pet shelf. */
   .rules-launch {
-    position: fixed; z-index: 65; right: clamp(18px, 3vw, 40px);
-    bottom: clamp(46px, 6vh, 64px); width: clamp(128px, 11vw, 154px);
+    position: fixed; z-index: 65; left: clamp(18px, 3vw, 40px); right: auto;
+    bottom: 18px; width: clamp(128px, 11vw, 154px);
     aspect-ratio: 1; padding: 0; border: 0;
     color: inherit; background: transparent; cursor: pointer;
     filter: drop-shadow(0 16px 17px rgba(22,20,19,.24));
@@ -1015,16 +1015,9 @@
     letter-spacing: .15em; text-transform: uppercase; color: var(--ink-dim);
   }
   .pet-rail__hidden:hover { color: var(--ink); }
-  @media (min-width: 941px) {
-    .app-shell:has(#petRail:not([hidden])) .rules-launch {
-      right: 166px;
-      bottom: 18px;
-    }
-  }
   @media (max-width: 940px) {
     /* off the device's flank, tucked above the status console */
     .pet-rail { right: 8px; top: auto; bottom: 82px; transform: none; width: 108px; max-height: 38vh; }
-    .app-shell:has(#petRail:not([hidden])) .rules-launch { right: 126px; }
   }
 
   /* ── the world rail: what the city is doing to the mood, at a glance ──
@@ -1068,7 +1061,8 @@
   }
   @media (max-width: 940px) {
     /* the shelf holds the right flank, so the world takes the left one */
-    .world-rail { right: auto; left: 8px; top: auto; bottom: 82px; transform: none; width: 108px; }
+    /* bottom clears the rules manual, which now keeps the same corner */
+    .world-rail { right: auto; left: 8px; top: auto; bottom: 156px; transform: none; width: 108px; }
   }
 
   /* ── new life: the pet shelf expands into a compact centre dialog ───── */
@@ -1221,6 +1215,13 @@
     box-shadow: inset 0 0 0 1px rgba(186,243,134,.12), inset 0 2px 8px rgba(0,0,0,.6);
     font-family: var(--mono); font-size: 11.5px; line-height: 1.5; letter-spacing: .025em;
   }
+  .rules-dialog__guide {
+    display: inline; margin-left: 6px; padding: 0; border: 0; cursor: pointer;
+    background: transparent; color: #d8ff9f; font: inherit;
+    text-decoration: underline; text-underline-offset: 2px;
+  }
+  .rules-dialog__guide:hover { color: #f0ffd6; }
+  .rules-dialog__guide:focus-visible { outline: 1px solid #baf386; outline-offset: 2px; }
   .rules-dialog__footer::before {
     content: ""; position: absolute; left: 17px; top: 50%; width: 8px; height: 8px;
     border-radius: 50%; transform: translateY(-50%); background: #8ee73f;
@@ -1334,8 +1335,7 @@
     .page-intro { gap: 16px; }
   }
   @media (max-width: 700px) {
-    .rules-launch { right: 10px; bottom: 60px; width: 86px; }
-    .app-shell:has(#petRail:not([hidden])) .rules-launch { right: 124px; }
+    .rules-launch { left: 10px; bottom: 60px; width: 86px; }
   }
   @media (max-width: 560px) {
     .topbar { padding: 12px; }
@@ -1355,8 +1355,7 @@
     }
     #directory.community-directory .acts { grid-column: 2 / -1; }
     .pet-feeders-popover { left: 0; right: auto; width: 100%; }
-    .rules-launch { right: 7px; bottom: 60px; width: 78px; }
-    .app-shell:has(#petRail:not([hidden])) .rules-launch { right: 122px; }
+    .rules-launch { left: 7px; bottom: 60px; width: 78px; }
     .rules-dialog { width: calc(100vw - 16px); max-height: calc(100svh - 16px); }
     .rules-manual { max-height: calc(100svh - 28px); padding: 29px 18px 20px; }
     .rules-dialog__head { padding-right: 45px; }
@@ -1861,7 +1860,9 @@
         </li>
       </ol>
 
-      <p class="rules-dialog__footer">Viewing is free. Actions require wallet confirmation.</p>
+      <p class="rules-dialog__footer">Viewing is free. Actions require wallet confirmation.
+        <button class="rules-dialog__guide" id="rulesToGuide" type="button">Every number lives
+          in the full guide →</button></p>
     </article>
   </dialog>
 
@@ -2632,6 +2633,12 @@ rulesDialog.addEventListener("close", () => {
 // to a page — the manual is an object in this world, and it should open the
 // same way wherever it is asked for.
 $("rulesMenu").addEventListener("click", () => { closeAppMenu(); rulesTrigger.click(); });
+// The capsule hands off to the rulebook: five rules for the first minute,
+// the Guide for every number behind them.
+$("rulesToGuide").addEventListener("click", () => {
+  closeRulesDialog();
+  activateRoute("guide");
+});
 
 const personalityDialog = $("personalityDialog");
 const petFundsDialog = $("petFundsDialog");
@@ -3632,6 +3639,20 @@ function rememberPet(addr, name) {
   renderPetRail();
 }
 
+/** Record which contract era an owned pet is from; the shelf drops relics. */
+function markLegacy(addr, isLegacy) {
+  const key = (signerAddress || "").toLowerCase();
+  const hit = myPets.find(p => p.address.toLowerCase() === (addr || "").toLowerCase());
+  if (!hit || hit.legacy === isLegacy) return;
+  hit.legacy = isLegacy;
+  try {
+    const all = mineAll();
+    const row = (all[key] || []).find(p => p.address.toLowerCase() === addr.toLowerCase());
+    if (row) { row.legacy = isLegacy; localStorage.setItem("aipet_mine", JSON.stringify(all)); }
+  } catch { /* storage refused — the verdict holds for this session */ }
+  renderPetRail();
+}
+
 async function directoryPetsOf(me) {
   const rows = [];
   if (!client || !factoryAddress) return rows;
@@ -3706,7 +3727,10 @@ async function walletPetsFromChain(me) {
           client.readContract({ address: d.addr, functionName: "get_state", args: [] }),
         ]);
         v = String(owner).toLowerCase() === me && typeof s?.name === "string"
-          ? { name: String(s.name).slice(0, 24), alive: s.alive !== false } : null;
+          ? { name: String(s.name).slice(0, 24), alive: s.alive !== false,
+              // era verdict, while the state is in hand: a pet without the
+              // world fields is from the pre-redesign contract
+              legacy: !("condition" in s) } : null;
       } catch { v = null; }
       if (v || Date.now() / 1000 - d.ts > 600) {
         verdicts[key] = v;
@@ -3719,6 +3743,7 @@ async function walletPetsFromChain(me) {
       pets.push({
         address: d.addr, name: v.name || "pet", ts: d.ts,
         alive: v.alive !== false, seen: touched.get(key) || d.ts,
+        ...(v.legacy !== undefined ? { legacy: v.legacy } : {}),
       });
     }
   }
@@ -3744,8 +3769,10 @@ async function refreshMyPets({ switched = false } = {}) {
     if (known) {
       if (r.name && (!known.name || known.name === "pet")) known.name = r.name;
       if (r.ts && !known.ts) known.ts = r.ts;
+      if (r.legacy !== undefined && known.legacy === undefined) known.legacy = r.legacy;
     } else {
-      merged.set(key, { address: r.address, name: r.name || "pet", ts: r.ts });
+      merged.set(key, { address: r.address, name: r.name || "pet", ts: r.ts,
+        ...(r.legacy !== undefined ? { legacy: r.legacy } : {}) });
       // Debris check, applied only to pets this browser has never played:
       // dead on first sight, or untouched by its own wallet for over a week.
       // The stored `alive` flag alone cannot carry this — a pet only dies when
@@ -3761,16 +3788,42 @@ async function refreshMyPets({ switched = false } = {}) {
   myPets = [...merged.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0));
   try {
     const all = mineAll();
-    all[me] = myPets.map(p => ({ address: p.address, name: p.name, ...(p.ts ? { ts: p.ts } : {}) }));
+    all[me] = myPets.map(p => ({ address: p.address, name: p.name, ...(p.ts ? { ts: p.ts } : {}),
+      ...(p.legacy !== undefined ? { legacy: p.legacy } : {}) }));
     localStorage.setItem("aipet_mine", JSON.stringify(all));
   } catch { /* storage refused — the shelf still works for this session */ }
   renderPetRail();
+  // Old-contract pets are dead weight on the shelf (decided 2026-08-22): they
+  // predate the world fields and can never fill the world rail, so the shelf
+  // drops them entirely — not even into the hidden count. The marker is the
+  // contract itself: get_state without a `condition` key. Entries with no
+  // verdict yet are judged here, a few per refresh, and the verdict is
+  // remembered. A direct link still opens a relic; the shelf just stops
+  // offering it.
+  const judged = myPets.filter(p => p.legacy === undefined
+    && !hiddenSetFor(me).has(p.address.toLowerCase())).slice(0, 6);
+  if (judged.length && client) {
+    await Promise.all(judged.map(async (p) => {
+      try {
+        const s = await client.readContract({ address: p.address, functionName: "get_state", args: [] });
+        if (s && typeof s === "object") p.legacy = !("condition" in s);
+      } catch { /* unreachable right now — judge it on a later refresh */ }
+    }));
+    if (me !== (signerAddress || "").toLowerCase()) return;
+    try {
+      const all = mineAll();
+      all[me] = myPets.map(p => ({ address: p.address, name: p.name, ...(p.ts ? { ts: p.ts } : {}),
+        ...(p.legacy !== undefined ? { legacy: p.legacy } : {}) }));
+      localStorage.setItem("aipet_mine", JSON.stringify(all));
+    } catch { /* storage refused — verdicts hold for this session */ }
+    renderPetRail();
+  }
   // What is ON the shelf, for the message below; hidden pets are owned but
   // resting. Note what is deliberately absent here: no pet is ever opened just
   // because a wallet connected. The device stays dark until the player picks
   // one — from the shelf, a link, or a fresh hatch.
   const hidden = hiddenSetFor(me);
-  const visible = myPets.filter(p => !hidden.has(p.address.toLowerCase()));
+  const visible = myPets.filter(p => p.legacy !== true && !hidden.has(p.address.toLowerCase()));
   // A DIFFERENT signer just took over. If it does not own the pet on screen,
   // stop showing it a stranger's pet and hand back the choice — except when
   // the open pet is exactly what the page's link pointed at: a visitor who
@@ -3876,12 +3929,16 @@ function renderPetRail() {
   const me = signerAddress.toLowerCase();
   const hidden = hiddenSetFor(me);
   const cur = (address || "").toLowerCase();
+  // Old-contract relics are off the shelf entirely — not shown, not counted
+  // as hidden. The one exception is the same as for hidden pets below: the
+  // pet on screen always shows, or the shelf would lie about where you are.
+  const roster = myPets.filter(p => p.legacy !== true || p.address.toLowerCase() === cur);
   // The open pet always shows, hidden or not: a shelf that cannot point at
   // what is on screen would be lying about where you are.
   const isHidden = p => hidden.has(p.address.toLowerCase()) && p.address.toLowerCase() !== cur;
-  const shown = myPets.filter(p => !isHidden(p));
-  const ghosts = showHidden ? myPets.filter(isHidden) : [];
-  const hiddenCount = myPets.length - shown.length;
+  const shown = roster.filter(p => !isHidden(p));
+  const ghosts = showHidden ? roster.filter(isHidden) : [];
+  const hiddenCount = roster.length - shown.length;
   rail.innerHTML = `<p class="pet-rail__label">my pets</p>`
     + shown.map(p => {
         const here = p.address.toLowerCase() === cur;
@@ -4260,6 +4317,8 @@ async function loadState(opts = {}) {
     // Opened by address, turned out to be ours — the shelf should know it.
     // Also picks up the real name for pets remembered before it was read.
     if (isOwner) rememberPet(address, s.name);
+    // Any full state read doubles as the era verdict for the shelf.
+    markLegacy(address, !("condition" in s));
 
     $("modelTag").textContent = timeScale > 1 ? `GEN-${timeScale}×` : "GEN-001";
     $("petFundsMenu").hidden = !isOwner;
