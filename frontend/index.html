@@ -3316,34 +3316,72 @@ function rebuildClient() {
 
 let walletProvider = null;
 
+/** The user closing the wallet's dialog. An answer, not a fault. */
+const walletRejected = (err) => err?.code === 4001
+  || /user rejected|user denied|rejected the request/i.test(err?.message || "");
+
+/** What a wallet needs to know to add the chain by itself. */
+function chainParams(chain) {
+  return {
+    chainId: `0x${chain.id.toString(16)}`,
+    chainName: chain.name,
+    nativeCurrency: chain.nativeCurrency,
+    rpcUrls: [...chain.rpcUrls.default.http],
+    ...(chain.blockExplorers?.default?.url
+      ? { blockExplorerUrls: [chain.blockExplorers.default.url] } : {}),
+  };
+}
+
+/** The same facts as a note a person can type into a wallet by hand. */
+function chainByHand(chain, why) {
+  return `The wallet would not add ${chain.name} on its own`
+    + (why ? ` (it said: ${why})` : "") + ".\n"
+    + "Add the network by hand in the wallet, then press Connect wallet again:\n"
+    + `  Network name  ${chain.name}\n`
+    + `  RPC URL       ${chain.rpcUrls.default.http[0]}\n`
+    + `  Chain ID      ${chain.id}\n`
+    + `  Symbol        ${chain.nativeCurrency.symbol}`
+    + (chain.blockExplorers?.default?.url ? `\n  Explorer      ${chain.blockExplorers.default.url}` : "");
+}
+
 /**
  * Put the wallet on the right chain, adding it if the wallet has never seen it.
  *
  * genlayer-js refuses to send while the wallet sits on another chain, and it is
  * right to: the transaction would be signed for the wrong chain id. Bradbury is
  * a testnet no wallet ships by default, so "unknown chain" is the normal first
- * answer, not an error — 4902 means add it and try again.
+ * answer, not an error.
+ *
+ * The standard says a wallet answers that with code 4902. In practice every
+ * wallet phrases it its own way — MetaMask uses 4902, Rabby uses 4902 but
+ * sometimes hands the page only the message ("Unrecognized chain ID … Try
+ * adding the chain using wallet_switchEthereumChain first" — the method it
+ * names is the one that just failed), others wrap it in -32603. So the code is
+ * not consulted at all: whatever the reason the switch was refused, short of
+ * the user closing the dialog, the next move is to offer adding the chain and
+ * then look at eth_chainId, which is the only thing that cannot lie.
  */
 async function ensureWalletOnChain(provider, chain) {
   const want = `0x${chain.id.toString(16)}`;
-  if (await provider.request({ method: "eth_chainId" }) === want) return;
+  const onChain = async () => (await provider.request({ method: "eth_chainId" })) === want;
+  if (await onChain()) return;
   try {
     await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
   } catch (err) {
-    const code = err?.code ?? err?.data?.originalError?.code;
-    if (code !== 4902) throw err;
-    await provider.request({
-      method: "wallet_addEthereumChain",
-      params: [{
-        chainId: want,
-        chainName: chain.name,
-        nativeCurrency: chain.nativeCurrency,
-        rpcUrls: [...chain.rpcUrls.default.http],
-        ...(chain.blockExplorers?.default?.url
-          ? { blockExplorerUrls: [chain.blockExplorers.default.url] } : {}),
-      }],
-    });
+    if (walletRejected(err)) throw err;
+    try {
+      await provider.request({ method: "wallet_addEthereumChain", params: [chainParams(chain)] });
+    } catch (addErr) {
+      if (walletRejected(addErr)) throw addErr;
+      throw new Error(chainByHand(chain, addErr?.message || addErr));
+    }
+    // Most wallets switch as part of adding; a few only add. Ask once more
+    // before trusting it.
+    if (!(await onChain())) {
+      await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
+    }
   }
+  if (!(await onChain())) throw new Error(chainByHand(chain));
 }
 
 function hideOwnerTools() {
@@ -3399,9 +3437,14 @@ function watchWallet(provider) {
     if (factoryAddress) loadDirectory({});
   });
   // The chain moving out from under us cannot be repaired silently — say it.
-  provider.on("chainChanged", () => {
-    setStatus("The wallet switched network. Press Connect wallet to come back to "
-      + currentChain().name + ".", "warn");
+  provider.on("chainChanged", (chainId) => {
+    const want = `0x${currentChain().id.toString(16)}`;
+    if (String(chainId).toLowerCase() === want) {
+      setStatus("The wallet is back on " + currentChain().name + ".", "ok");
+      return;
+    }
+    setStatus("The wallet switched to another network. Press Connect wallet to come back to "
+      + currentChain().name + " — it will offer the switch.", "warn");
   });
 }
 
@@ -3421,9 +3464,11 @@ $("connectWallet").onclick = async () => {
     watchWallet(provider);
     if (address) await loadState();
   } catch (e) {
-    // 4001 is the user closing the dialog. That is an answer, not a fault.
-    const denied = e?.code === 4001;
-    setStatus(denied ? "Wallet request dismissed." : "Could not connect: " + (e?.message || e),
+    const denied = walletRejected(e);
+    setStatus(denied
+      ? "Wallet request dismissed. The pet lives on " + currentChain().name
+        + " — press Connect wallet again and allow the network switch."
+      : "Could not connect: " + (e?.message || e),
       denied ? "warn" : "err");
   } finally { setBusy(false); }
 };
