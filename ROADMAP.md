@@ -8,7 +8,14 @@ Last updated: 2026-08-22.
 ## 0. What shipped after 2026-08-10 (the redesign wave)
 
 The sections below this one describe the contract era and are kept as written; everything in this
-block landed on the `gameplay-mechanics` branch between 2026-08-12 and 2026-08-22 and is live.
+block landed on the `gameplay-mechanics` branch between 2026-08-12 and 2026-08-27 and is live.
+
+- **The directory verifies code and ranks the full set (2026-08-27).** Answering the GenLayer
+  team's review: `register()` now fetches the candidate's CODE from the network's RPC inside
+  `strict_eq` and admits only sha256 fingerprints of released builds; the board lives in factory
+  storage (pets push `report()` after every feeding, `refresh(pet)` pulls the rest) and
+  `get_leaderboard` sorts the FULL set before paging. §2.8 has the design, §3 the live proof:
+  directory `0xB7130e9c882abc57a0e558b7338472E7F04d85F2`, and a pet registered pre-finalization.
 
 - **Production hosting.** The site runs at **https://youraipet.xyz** behind Caddy, deployed by
   [`deploy/deploySite.sh`](deploy/deploySite.sh) (build → self-containment checks → rsync → health
@@ -297,35 +304,56 @@ npm run demo:persona          # a fast-clock pet, five actions, watch the charac
 
 ### 2.8 The directory — one board across every pet
 
-[`contracts/pet_factory.py`](contracts/pet_factory.py). `register(pet)` admits any address that can
-prove it behaves like an AiPet; `get_leaderboard(offset, limit)` ranks the members by what their
+[`contracts/pet_factory.py`](contracts/pet_factory.py). `register(pet)` admits an address only after
+proving what code runs there; `get_leaderboard(offset, limit)` ranks the members by what their
 communities have fed them. That ranking is the whole point — it is the one thing a single pet
 contract cannot have, and it works on pets deployed long before the directory existed and by older
 versions of the contract.
 
-**Membership is earned by answering, not granted.** `_looks_like_a_pet` reads the candidate's own
-`get_state()` from finalized state, and the name and owner recorded are what the pet says about
-itself, cleaned. Whoever calls `register()` gets no say in either. An address with no code never even
-reaches that check — GenVM aborts the caller while starting the sub-VM.
+**Redesigned 2026-08-27**, after the GenLayer team reviewed the project and called out both halves
+of the old design: membership was a test of *shape* (answer `get_state()` pet-shaped and you were
+in — twenty honest-looking lines claiming `total_fed_wei: 10**30` owned the board forever), and the
+leaderboard paged the roster *before* sorting, so "page 1" was the first 50 registered pets sorted
+among themselves and a champion registered 51st could never reach it.
 
-**The leaderboard reads pets live**, from finalized state, one sub-VM per pet: a cached total would
-be wrong within the hour. Hence the page cap; hence a pet that has stopped answering is skipped
-rather than fatal; and hence `_num()` on every self-reported number, because a pet that *lies* must
-not take the board down either (§3c).
+**Membership is now proof of code.** GenVM gives a contract no way to read another contract's code
+(no host call; a CREATE2 address commits to factory+salt+chain, never to code — both checked in the
+SDK). But the network's RPC serves any contract's source via `gen_getContractCode`, and a contract
+can make web requests in a nondet block — so `register()` asks the network itself: fetch the
+candidate's code inside `gl.eq_principle.strict_eq`, sha256 it, and require the hash to be on the
+admin's allowlist of released artifacts (`add_fingerprint`; `tools/fingerprint.mjs` prints the hash
+of a build file or of any deployed address). Measured live (§3): validators agree in ~15 s, the
+hash matches `sha256sum build/ai_pet.py` bit for bit, and the RPC serves code for an ACCEPTED
+deploy — so a pet registers the moment it hatches instead of waiting ~40 min for finalization, and
+an EOA gets a civil `UserError` instead of the old un-catchable sub-VM abort. The RPC URL is
+admin-settable storage (`set_rpc`) — it is the one centralized dependency, and it should outlive an
+endpoint move without a redeploy.
 
-**There is no `spawn()` any more.** There was: `gl.deploy_contract` with a CREATE2 salt, so a new
+**The board is storage, not a fan-out of sub-VMs.** Registered pets push their own row after every
+feeding and revive — `AiPet._report_to_registry` emits `report(...)` `on="accepted"`, and the
+directory authenticates it by `gl.message.sender_address`, which for a contract→contract message IS
+the calling contract's address (measured, `probes/regProbe.log`; `origin_address` is a consensus
+address and useless for authorship). Anyone can `refresh(pet)` to pull a row live for pets built
+before `report()` existed (one sub-VM, `LATEST_FINAL`, works only after the pet's deploy finalizes).
+`get_leaderboard` then sorts the FULL set from its own storage and cuts the page after sorting, so
+`offset=50` really is ranks 51…100. The sanitizers (`_num`, `_clean`) stay on every field — a future
+allowlisted build must degrade to a silly row, never take the board down (§3c).
+
+**There is still no `spawn()`.** There was: `gl.deploy_contract` with a CREATE2 salt, so a new
 pet's address came back in the same transaction. It was voted through, its own writes landed, and the
-deployment it queued never produced a contract anywhere — see §4.11 for the investigation and what it
-ruled out. Shipping a method that cannot work is worse than not shipping it: it is the first thing a
-reader would try, and it fails in a way that looks like the contract's fault. Deploying a pet
-directly works, and is what the frontend and `deploy/bradbury.mjs` do.
+deployment it queued never produced a contract anywhere — see §4.11 for the investigation, including
+the 2026-08-27 re-test (still stuck; the finalization revert is `Ghost already deployed` now).
+Shipping a method that cannot work is worse than not shipping it. Deploying a pet directly works,
+and is what the frontend and `deploy/bradbury.mjs` do; with code-hash membership a factory-deploy
+would add convenience, not trust.
 
 Two things from that work are worth keeping even though the method is gone. **A factory can never
-embed the pet's source** — the deploy ceiling is ~52 KB (§4) and the built pet is ~29 KB, so the code
-would have to ride in as a parameter, which is exactly why such a factory can never promise *what* it
-deploys and why `register()` verifies rather than trusts. And **`AiPet.__init__` still takes an
-optional `owner`**: `gl.message.sender` in a constructor is whoever paid for the deploy, so without
-it a pet can only ever belong to its deployer — no gifting one, no deploying on a user's behalf.
+embed the pet's source** — the deploy ceiling is ~52 KB (§4) and the built pet is ~40 KB, so the code
+would have to ride in as a parameter — although with the allowlist that stopped mattering: hashes,
+not sources, are what registration trusts. And **`AiPet.__init__` still takes an optional `owner`**
+(and now an optional `registry`): `gl.message.sender` in a constructor is whoever paid for the
+deploy, so without it a pet can only ever belong to its deployer — no gifting one, no deploying on a
+user's behalf.
 
 ```bash
 npm run demo:factory                              # deploy a directory
@@ -340,6 +368,11 @@ The distinction that matters: *written* ≠ *proven*.
 
 | Claim | How it was proven |
 |---|---|
+| **The directory admits by code, not by shape (2026-08-27)** | New factory `0xB7130e9c88…85F2` on Bradbury. `register(0xda5779bB…5C89)` fetched that pet's code through `gen_getContractCode` inside `strict_eq`, hashed it to `b9f4ec96c2cf…` (allowlisted) and admitted it — vote AGREE. The same mechanism measured standalone: on-chain fingerprint == off-chain `sha256sum`, bit for bit; an EOA and an empty address return a deterministic "no contract code" `UserError` (probes/attestProbe.log, attestEdge.log) |
+| **A pet registers the moment it hatches** | `Probe` `0x471Be7DE…9d43` deployed 11:21 (ACCEPTED, not finalized), `register()` voted AGREE at 11:24 — the RPC serves code for an ACCEPTED deploy, so the old ~40-minute finalization wait before joining the board is gone (probes/newPetArc.log) |
+| **A pet's own report() fills the board** | `Probe.feed(0.05 GEN)` → the pet's `_report_to_registry` message (`on="accepted"`) landed in factory storage with no refresh: board row `Probe / 5e16 wei` appeared, ranked below `Pixel / 1.35 GEN`. Sender-authenticated: the factory saw the PET's contract address as `gl.message.sender_address` (measured in probes/regProbe.log — and `origin_address` is a consensus address, so it is never used for authorship) |
+| **The ranking covers the full set** | `get_leaderboard` sorts every stored row and cuts the page after — pinned by direct tests (registration order deliberately disagreeing with rank order, pages `(0,2)`/`(2,2)` slicing the GLOBAL ranking) and shown live with Pixel (refresh-pulled) and Probe (report-pushed) in the right order |
+| **`refresh(pet)` pulls a pre-report() pet onto the board** | `refresh(0xda5779bB…5C89)` on the new factory read the old build live from LATEST_FINAL and stored `Pixel / 1.35 GEN / adult 16d / mood 52 / "noticeably curious and a little affectionate"` (probes/factoryRun.log; slow network day — ACCEPTED at 638 s) |
 | Contract mechanics, guards, death/revive, leaderboard, clamping, malformed-reply rejection, time_scale, event signatures, `__receive__`, market bands, visit bookkeeping and sanitizing, the decay cursor, a refunded feed-on-death, a poisoned leaderboard | 227/227 direct tests in the real GenVM runtime |
 | The contract deploys to a real network | Deployed twice to hosted Studio, reproducibly |
 | `check()` makes a real web request and a real LLM call, settled by consensus | Live Studio run; each action finalized in 40–55 s |
@@ -890,7 +923,11 @@ Ordered by how much they'd hurt.
     roughly a quarter of the size. The format is not documented anywhere I could find, and guessing
     it costs a deploy per attempt, so it is left for when it is documented.
 11. **A spawned pet never appeared at its address — the block is on the chain's side, and
-    `spawn()` has been removed because of it.** `spawn()` was voted through and its own writes
+    `spawn()` has been removed because of it.** *Re-tested 2026-08-27 (probes/spawnRetest.log):
+    still the same wall, with a new face — both a salted and an unsalted `gl.deploy_contract`
+    stuck at READY_TO_FINALIZE while `finalizeTransaction` now reverts `Ghost already deployed`
+    (it was `FinalizationNotAllowed()` in August), no `InternalMessageProcessed` in the logs, and
+    nothing at any derivable address.* `spawn()` was voted through and its own writes
     landed, but nothing was ever created at the other end. Investigated 2026-08-11 (the probes are
     in `probes/`), and the method was deleted from the contract on the same day: shipping a call
     that cannot work is worse than not shipping it, since it is the first thing a reader would try

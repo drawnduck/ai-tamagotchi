@@ -1047,7 +1047,7 @@ Network SETTLE: `get_balance()` упал на `REVIVE_COST`; вторая till-r
 | `till_revive_ready` | bool | `_till_revive_ready()` | нет → `?? false` (только платный revive) |
 | `health_regen_acc` | int | поле | нет |
 
-Фабрика (`_looks_like_a_pet` требует `name`, `mood`, `total_fed_wei`, `alive`; leaderboard — `_num`/`_clean`/`state.get`) новые ключи игнорирует. Не менять `pet_factory.py`.
+Фабрика (редизайн 2026-08-27: членство — по sha256 кода через nondet-запрос к RPC, строки борда — из её собственного хранилища через `report()`/`refresh()`, `_num`/`_clean`/`state.get` на каждом поле) новые ключи игнорирует. При выпуске новой сборки питомца добавь её отпечаток: `node tools/fingerprint.mjs build/ai_pet.py` → `add_fingerprint`.
 
 ### `get_social()`
 
@@ -1259,7 +1259,7 @@ Auth: без изменений. Persona по-прежнему on-chain.
 
 - `contracts/ai_pet.py` (1380 строк) — `_decay` 594–631, `_apply_world` 907–919 / freezing 914–915, `_nourish` 664–678, `play` 985–1000, `pet` 1002–1017, `visit` `_only_owner` 1043, pending overwrite 1128–1130, `withdraw` 1206–1225, `_stage` 233–238, `_evolve` 780–816, `_sanitize` 270–287, `_clear_greeting` 890–893
 - `build/ai_pet.py` — 28 979 байт в текущем дереве
-- `contracts/pet_factory.py` — `_looks_like_a_pet` 103–105, `get_leaderboard` `_num`/`_clean`
+- `contracts/pet_factory.py` — `_verify_code` (членство по коду), `report`/`refresh` (строки борда), `get_leaderboard` (сортировка всего набора, страница после сортировки)
 - `README.md`, `ROADMAP.md` §2.1–2.8, §4.3 (`get_top_feeders` / unbounded maps), §4.10 (потолок; замер 28 857), §5 Phase 5
 - `tests/direct/test_ai_pet.py` — `LETHAL_IDLE_H = 150`; `test_pet` mood 75; `test_validator` 77; `test_play` 80/62; `test_starving` 10/70; `test_revived_pet_acts_again` mood 61; `test_check` 66
 - `tests/direct/test_demo_playthrough.py`

@@ -21,6 +21,7 @@ import os
 import pytest
 
 from tests.direct.conftest import (
+    Chain,
     Neighbour,
     self_address,
     to_hex,
@@ -3737,3 +3738,90 @@ def test_leaving_the_owner_blank_keeps_the_old_behaviour(direct_vm, direct_deplo
     direct_vm.sender = direct_owner
     pet = direct_deploy(CONTRACT, *CTOR, 1, "")
     assert pet.get_owner().lower() == to_hex(direct_owner).lower()
+
+
+# --------------------------------------------------------------------------- #
+# Reporting to the directory (see _report_to_registry)
+# --------------------------------------------------------------------------- #
+
+REGISTRY = "0x" + "fa" * 20
+
+
+def test_feeding_pushes_the_row_to_the_registry(direct_vm, direct_deploy, direct_owner):
+    """The push half of the shared board: feed() ends with a report() message
+    to the directory, cheap and deterministic, delivered on acceptance."""
+    direct_vm.sender = direct_owner
+    pet = direct_deploy(CONTRACT, *CTOR, 1, "", REGISTRY)
+    chain = Chain(direct_vm)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Yum.", "mood_delta": 0}))
+
+    _feed(pet, direct_vm, GEN // 10)
+
+    reports = [m for m in chain.messages if m["calldata"]["method"] == "report"]
+    assert len(reports) == 1
+    msg = reports[0]
+    assert msg["address"].as_hex.lower() == REGISTRY.lower()
+    assert msg["on"] == "accepted"
+    assert int(msg["value"]) == 0
+    state = pet.get_state()
+    name, owner, fed, age, stage, alive, mood, character = msg["calldata"]["args"]
+    assert name == state["name"]
+    assert owner.lower() == to_hex(direct_owner).lower()
+    assert fed == int(state["total_fed_wei"])
+    assert age == state["age_days"]
+    assert stage == state["stage"]
+    assert alive is True
+    assert mood == state["mood"]
+    assert character == state["character"]
+
+
+def test_a_pet_without_a_registry_reports_to_nobody(direct_vm, direct_deploy, direct_owner):
+    direct_vm.sender = direct_owner
+    pet = direct_deploy(CONTRACT, *CTOR)
+    chain = Chain(direct_vm)
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Yum.", "mood_delta": 0}))
+
+    _feed(pet, direct_vm, GEN // 10)
+
+    assert [m for m in chain.messages if m["calldata"]["method"] == "report"] == []
+    assert pet.get_state()["registry"] == ""
+
+
+def test_set_registry_is_owner_only_and_can_be_cleared(
+        direct_vm, direct_deploy, direct_owner, direct_alice):
+    direct_vm.sender = direct_owner
+    pet = direct_deploy(CONTRACT, *CTOR)
+
+    direct_vm.sender = direct_alice
+    with direct_vm.expect_revert("only owner"):
+        pet.set_registry(REGISTRY)
+
+    direct_vm.sender = direct_owner
+    pet.set_registry(REGISTRY)
+    assert pet.get_state()["registry"].lower() == REGISTRY.lower()
+    pet.set_registry("")
+    assert pet.get_state()["registry"] == ""
+
+
+def test_revive_reports_the_pet_alive_again(direct_vm, direct_deploy, direct_owner):
+    """The board must not lag on the fun part: coming back from the dead."""
+    direct_vm.sender = direct_owner
+    warp_hours(direct_vm, 0)
+    pet = direct_deploy(CONTRACT, *CTOR, 1, "", REGISTRY)
+    chain = Chain(direct_vm)
+    warp_hours(direct_vm, 200)
+    pet.pet()                                   # long dead; this is the burial
+    assert pet.get_state()["alive"] is False
+
+    direct_vm.mock_llm(r".*", json.dumps({"quote": "Back.", "mood_delta": 0}))
+    direct_vm.value = GEN
+    try:
+        pet.revive()
+    finally:
+        direct_vm.value = 0
+
+    reports = [m for m in chain.messages if m["calldata"]["method"] == "report"]
+    assert len(reports) == 1
+    args = reports[0]["calldata"]["args"]
+    assert args[5] is True                      # alive
+    assert args[2] == GEN                       # the payment counts as feeding
