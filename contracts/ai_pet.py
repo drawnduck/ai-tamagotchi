@@ -868,10 +868,12 @@ class AiPet(gl.Contract):
     last_condition: str            # last coarsened weather category check() saw
     last_temp: str                 # last coarsened temperature band — display only
     last_world_ts: u256            # real ts of that reading (0 = never looked out)
+    # --- the directory (see _report_to_registry) ---
+    registry: Address              # AiPetFactory to push our row to (zero = none)
 
     # ---- constructor (private, no decorator) ----
     def __init__(self, name: str, persona: str, city: str, time_scale: int = 1,
-                 owner: str = ""):
+                 owner: str = "", registry: str = ""):
         """`time_scale` is how many virtual seconds pass per real second.
 
         1 is real time and the default. Anything higher makes a demo pet: at
@@ -888,6 +890,13 @@ class AiPet(gl.Contract):
         gifting one, and no deploying for a user from a script or another
         contract. Blank keeps the sender. Anyone may set it to any address, which
         is not a hole: the worst you can do is give someone a pet.
+
+        `registry` is the AiPetFactory directory this pet reports its
+        leaderboard row to after every feeding (see _report_to_registry).
+        Blank means no directory; the owner can point it later with
+        set_registry(). Naming a wrong address is not a hole either: the
+        directory only believes report() from pets whose CODE it verified at
+        registration, and an unregistered reporter is just refused.
         """
         scale = int(time_scale)
         if scale < 1:
@@ -914,6 +923,7 @@ class AiPet(gl.Contract):
         self.last_temp = ""
         self.last_world_ts = u256(0)
         self.owner = Address(owner) if owner else gl.message.sender_address
+        self.registry = Address(registry) if registry else Address(b"\x00" * 20)
         self.name = name
         self.persona = persona
         self.city = city
@@ -1190,7 +1200,41 @@ class AiPet(gl.Contract):
                 and self._heal_is_due()):
             self.health = _clamp(int(self.health) + HEALTH_FEED_HEAL)
             self.last_heal_ts = u256(_now())
+        self._report_to_registry()
         return gain
+
+    def _report_to_registry(self) -> None:
+        """Push this pet's leaderboard row to its directory, if one is set.
+
+        The directory keeps the board in ITS storage (so it can rank the full
+        set without a sub-VM per pet), and this is the push half: called
+        wherever the ranking key — total_fed — moves, plus revive(), because a
+        board that shows a live pet as dead is lying about the fun part.
+        Everything else (mood, age drifting between feedings) is covered by the
+        directory's public refresh().
+
+        `on="accepted"` so the row updates in seconds, not at finalization —
+        the same choice, for the same reason, as delivering a visit greeting.
+        The message authenticates itself: the directory sees OUR contract
+        address as sender (measured — probes/regProbe.log) and refuses
+        reporters it has not code-verified. If this pet is not registered, the
+        message bounces off the directory and nothing here notices: reporting
+        is a courtesy, never a dependency, and a wrong registry address must
+        not be able to break feeding.
+        """
+        if int.from_bytes(self.registry.as_bytes, "big") == 0:
+            return
+        age = self._age_days()
+        gl.get_contract_at(self.registry).emit(on="accepted").report(
+            str(self.name),
+            self.owner.as_hex,
+            int(self.total_fed),
+            age,
+            _stage(age),
+            bool(self.alive),
+            int(self.mood),
+            self._character(),
+        )
 
     def _heal_is_due(self) -> bool:
         """Has a virtual hour passed since food last mended a point?
@@ -2011,6 +2055,10 @@ class AiPet(gl.Contract):
             self._credit_feeder(gl.message.sender_address, value)
         # restart the decay clock so the revive isn't instantly undone
         self.last_interaction_ts = u256(_now())
+        # revive books its value itself rather than through _nourish, so it
+        # reports itself too: alive flipping true is exactly what the board
+        # must not lag on
+        self._report_to_registry()
         PetRevived(
             gl.message.sender_address,
             paid_wei=str(value),
@@ -2111,6 +2159,17 @@ class AiPet(gl.Contract):
         self.allow_public_feed = allow
 
     @gl.public.write
+    def set_registry(self, registry: str) -> None:
+        """Point the pet at a directory to report to, or "" to stop reporting.
+
+        For pets hatched before their owner knew about the directory — new ones
+        take it as a constructor argument. See _report_to_registry for why a
+        wrong address here is harmless.
+        """
+        self._only_owner()
+        self.registry = Address(registry) if registry else Address(b"\x00" * 20)
+
+    @gl.public.write
     def set_evolution(self, allow: bool) -> None:
         """Owner's switch: may experience change this pet's character at all?
 
@@ -2182,6 +2241,12 @@ class AiPet(gl.Contract):
             # true only when a value==0 revive() would really be accepted — a UI
             # must never work this out from the balance alone
             "till_revive_ready": self._till_revive_ready(),
+            # the directory this pet reports its row to ("" = none) — see
+            # _report_to_registry
+            "registry": (
+                self.registry.as_hex
+                if int.from_bytes(self.registry.as_bytes, "big") else ""
+            ),
         }
 
     @gl.public.view

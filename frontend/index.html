@@ -3546,11 +3546,16 @@ $("newPetForm").addEventListener("submit", async (event) => {
         : "")
       + "Your wallet will ask you to confirm. This is the one expensive step; "
       + "everything after it is cheap.");
-    // Only pass the 4th constructor argument when it is not the default, so an
-    // ordinary hatch sends exactly the call it always sent.
-    const ctorArgs = HATCH_SCALE > 1
-      ? [name, HATCH_PERSONA, city, HATCH_SCALE]
-      : [name, HATCH_PERSONA, city];
+    // Only pass trailing constructor arguments when they are not the default,
+    // so an ordinary hatch sends the shortest call that still says everything.
+    // A known directory rides along as the pet's registry: the pet then pushes
+    // its leaderboard row there after every feeding (see _report_to_registry),
+    // which is what keeps the shared board fresh without reading every pet.
+    const ctorArgs = factoryAddress
+      ? [name, HATCH_PERSONA, city, HATCH_SCALE, "", factoryAddress]
+      : HATCH_SCALE > 1
+        ? [name, HATCH_PERSONA, city, HATCH_SCALE]
+        : [name, HATCH_PERSONA, city];
     const hash = await sendPatiently("deploy", () =>
       client.deployContract({ code, args: ctorArgs }));
     const tx = await waitForSettled(client, hash, {
@@ -4521,9 +4526,18 @@ $("traits").addEventListener("keydown", (e) => {
 // Order: a `?dir=` from the link wins (someone linked THAT board), then whatever
 // this browser last loaded, then the one deployed with this project.
 const DEFAULT_DIRECTORY = {
-  testnetBradbury: "0x9634498635CBf923a390862e249c7b880e0bB7be",
+  // 2026-08-27: the code-verifying directory (see pet_factory.py's docstring).
+  // Its predecessor 0x9634498635CBf923a390862e249c7b880e0bB7be trusted shape,
+  // not code, and paged the board before sorting it.
+  testnetBradbury: "0xB7130e9c882abc57a0e558b7338472E7F04d85F2",
 };
 const feederCache = new Map();
+// a browser that cached the superseded directory follows the project to the new
+// one; a browser pointed somewhere else on purpose is left alone
+if (localStorage.getItem("aipet_factory")?.toLowerCase()
+    === "0x9634498635cbf923a390862e249c7b880e0bb7be") {
+  localStorage.removeItem("aipet_factory");
+}
 let factoryAddress = $("factoryAddr").value.trim()
   || localStorage.getItem("aipet_factory")
   || DEFAULT_DIRECTORY[$("net").value] || "";
@@ -4679,6 +4693,9 @@ async function loadDirectory({ announce }) {
     $("directory").innerHTML = rows.length
       ? rows.map((r, i) => {
           const mine = r.address.toLowerCase() === me;
+          // a fresh registration is an empty row until the pet's first feeding
+          // reports it (or someone calls refresh) — show something human
+          const shownName = r.name || "just hatched";
           const totalFed = fromWei(r.total_fed_wei).toFixed(3);
           const popoverId = `pet-feeders-${i}`;
           // Nobody visits or feeds their own pet from here — the device does
@@ -4692,9 +4709,9 @@ async function loadDirectory({ announce }) {
               + `${r.alive && signerAddress ? "" : " disabled"} title="put a meal in this pet">feed</button>`
               + `</span>`;
           return `<li class="directory-pet" tabindex="0" data-pet-address="${escapeHtml(r.address)}"`
-            + ` aria-describedby="${popoverId}" aria-label="${escapeHtml(r.name)}, ${escapeHtml(short(r.address))}, ${totalFed} GEN fed">`
+            + ` aria-describedby="${popoverId}" aria-label="${escapeHtml(shownName)}, ${escapeHtml(short(r.address))}, ${totalFed} GEN fed">`
             + `<span class="rank">${i + 1}</span>`
-            + `<span class="who${mine ? " me" : ""}">${escapeHtml(r.name)} `
+            + `<span class="who${mine ? " me" : ""}">${escapeHtml(shownName)} `
             + `${escapeHtml(short(r.address))}`
             + `${r.alive ? "" : ` <span class="dead-mark">✝</span>`}</span>`
             + `<span class="amt">${totalFed}</span>${acts}`
